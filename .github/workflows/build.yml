@@ -2,7 +2,10 @@ name: Build board
 
 on:
   schedule:
-    - cron: "0 21 * * *"  # 5 PM EDT / 4 PM EST
+    # Every 30 min from noon to midnight ET (cron is UTC), so lineup and injury news shows up through tip-off.
+    # StatMuse game logs are cached per day, so most runs only re-pull Rotowire and FanDuel.
+    - cron: "*/30 16-23 * * *"
+    - cron: "*/30 0-4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -12,7 +15,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -25,6 +28,11 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: cache
+          key: statmuse-${{ github.run_id }}
+          restore-keys: statmuse-
       - run: python -u build.py
       - uses: actions/upload-pages-artifact@v3
         with:

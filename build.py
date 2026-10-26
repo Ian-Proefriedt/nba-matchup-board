@@ -10,7 +10,8 @@ import re
 import sys
 import time
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from statistics import mean
 from urllib.error import HTTPError, URLError
@@ -26,6 +27,7 @@ SKIP_STATS_FOR = {"Out", "OFS"}  # no point pulling stats for players ruled out
 BOOKS = ["fanduel", "draftkings", "betmgm", "composite"]
 
 OUT_PATH = Path(__file__).parent / "site" / "data.json"
+CACHE_PATH = Path(__file__).parent / "cache" / "statmuse.json"
 
 
 def fetch(url, retries=2):
@@ -288,6 +290,24 @@ def parse_statmuse(html, name):
     }
 
 
+def cache_day():
+    # A 'day' rolls over at 6 AM ET, after the previous night's games are final
+    return (datetime.now(ZoneInfo("America/New_York")) - timedelta(hours=6)).date().isoformat()
+
+
+def load_cache():
+    try:
+        saved = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+        return saved["players"] if saved.get("day") == cache_day() else {}
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
+def save_cache(players):
+    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CACHE_PATH.write_text(json.dumps({"day": cache_day(), "players": players}), encoding="utf-8")
+
+
 def main():
     print("Fetching Rotowire lineups...")
     slate_date, games = parse_lineups(fetch(LINEUPS_URL))
@@ -314,18 +334,23 @@ def main():
                 if p["status"] not in SKIP_STATS_FOR:
                     players[p["name"]] = None
 
-    print(f"Fetching StatMuse for {len(players)} players...")
-    failed = []
-    for i, name in enumerate(players, 1):
+    # Game logs only change once games finish, so reuse today's cached pages and fetch only new names
+    cache = load_cache()
+    todo = [n for n in players if n not in cache]
+    print(f"StatMuse: {len(players) - len(todo)} cached, fetching {len(todo)}...")
+    for i, name in enumerate(todo, 1):
         try:
-            players[name] = parse_statmuse(fetch(STATMUSE_URL.format(slug=slugify(name))), name)
+            cache[name] = parse_statmuse(fetch(STATMUSE_URL.format(slug=slugify(name))), name)
         except Exception as err:  # keep going; one bad page shouldn't sink the board
             print(f"  {name}: {err}", file=sys.stderr)
-        if players[name] is None:
-            failed.append(name)
+            cache[name] = None
         if i % 20 == 0:
-            print(f"  {i}/{len(players)}")
+            print(f"  {i}/{len(todo)}")
         time.sleep(STATMUSE_DELAY)
+    save_cache(cache)
+    for name in players:
+        players[name] = cache.get(name)
+    failed = [n for n in players if players[n] is None]
 
     for g in games:
         for side in ("away", "home"):
