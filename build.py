@@ -1,8 +1,9 @@
 """Build site/data.json for the NBA matchup board.
 
 Pulls tonight's lineups, injuries, odds and refs from Rotowire's public
-lineups page, projected minutes from FanDuel Research, then each relevant
-player's last 10 games from StatMuse.
+lineups page, player points/threes lines from Rotowire's props page,
+projected minutes from FanDuel Research, then each relevant player's last
+10 games from StatMuse.
 """
 
 import json
@@ -227,6 +228,50 @@ def attach_projections(side, rows):
                      for r in bench[:BENCH_MAX]]
 
 
+# ---------- Rotowire player props ----------
+
+PROPS_URL = "https://www.rotowire.com/betting/nba/player-props.php"
+PROP_TYPES = ["pts", "threes"]
+PROP_BOOKS = ["fanduel", "draftkings", "mgm", "caesars", "betrivers", "hardrock", "thescore", "betr"]  # first with both sides wins
+
+
+def parse_props(html):
+    """Lines by (team, player key) -> {"pts": {...}, "threes": {...}} from the tables embedded in the props page."""
+    props = {}
+    for m in re.finditer(r"data:\s*(\[.*?\])\s*,\s*\n", html, flags=re.S):
+        try:
+            rows = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if not rows:
+            continue
+        # single-prop tables only (the combined tables repeat the same lines)
+        kinds = [t for t in PROP_TYPES if f"fanduel_{t}" in rows[0]]
+        if len(kinds) != 1 or "fanduel_reb" in rows[0]:
+            continue
+        kind = kinds[0]
+        for r in rows:
+            for book in PROP_BOOKS:
+                line, over, under = r.get(f"{book}_{kind}"), r.get(f"{book}_{kind}Over"), r.get(f"{book}_{kind}Under")
+                if line and over and under:
+                    key = (team_code(r.get("team", "")), name_key(r.get("name", "")))
+                    props.setdefault(key, {})[kind] = {"line": float(line), "over": int(over), "under": int(under), "book": book}
+                    break
+    return props
+
+
+def attach_props(team, side, props):
+    team_props = {k[1]: v for k, v in props.items() if k[0] == team}
+    for p in side["starters"] + side["mayNotPlay"] + side["bench"]:
+        key = name_key(p["name"])
+        found = team_props.get(key)
+        if found is None:  # same last-name fallback as projections
+            last = key.split()[-1:] if key else []
+            same = [v for k, v in team_props.items() if k.split()[-1:] == last]
+            found = same[0] if len(same) == 1 else None
+        p["props"] = found
+
+
 # ---------- StatMuse ----------
 
 def parse_statmuse(html, name):
@@ -326,6 +371,17 @@ def main():
     for g in games:
         for side in ("away", "home"):
             attach_projections(g[side], projections.get(team_code(g[side]["abbr"]), []))
+
+    print("Fetching Rotowire player props...")
+    try:
+        props = parse_props(fetch(PROPS_URL))
+        print(f"  lines for {len(props)} players")
+    except Exception as err:  # the board still works without props
+        print(f"  player props unavailable: {err}", file=sys.stderr)
+        props = {}
+    for g in games:
+        for side in ("away", "home"):
+            attach_props(team_code(g[side]["abbr"]), g[side], props)
 
     players = {}
     for g in games:
