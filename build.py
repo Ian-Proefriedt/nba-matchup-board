@@ -1,7 +1,8 @@
 """Build site/data.json for the NBA matchup board.
 
 Pulls tonight's lineups, injuries, odds and refs from Rotowire's public
-lineups page, then each relevant player's last 10 games from StatMuse.
+lineups page, projected minutes from FanDuel Research, then each relevant
+player's last 10 games from StatMuse.
 """
 
 import json
@@ -133,6 +134,97 @@ def parse_lineups(html):
     return slate_date, games
 
 
+# ---------- FanDuel Research projections ----------
+
+FD_GRAPHQL = "https://www.fanduel.com/research/api/graphql"
+FD_SLATES = "query GetSlates($sport: ProjectionSports!) { getSlates(sport: $sport) { id name } }"
+FD_PROJECTIONS = """query GetProjections($input: ProjectionsInput!) { getProjections(input: $input) {
+  ... on NbaPlayer { player { name position } team { abbreviation }
+    minutes points rebounds assists threePointsMade } } }"""
+BENCH_MIN_MINUTES = 10  # bench players projected under this are left off the board
+BENCH_MAX = 5
+
+# Rotowire, FanDuel and others disagree on a few team codes
+TEAM_ALIASES = {"UTAH": "UTA", "NY": "NYK", "GS": "GSW", "SA": "SAS", "NO": "NOP", "WSH": "WAS",
+                "PHO": "PHX", "BRK": "BKN", "CHO": "CHA"}
+
+
+def team_code(abbr):
+    return TEAM_ALIASES.get(abbr.upper(), abbr.upper())
+
+
+def fd_query(query, variables):
+    body = json.dumps({"query": query, "variables": variables}).encode()
+    req = Request(FD_GRAPHQL, data=body, headers={
+        "User-Agent": USER_AGENT, "Content-Type": "application/json",
+        "Origin": "https://www.fanduel.com", "Referer": "https://www.fanduel.com/research/nba/fantasy/dfs-projections",
+    })
+    with urlopen(req, timeout=30) as resp:
+        data = json.load(resp)
+    if data.get("errors"):
+        raise RuntimeError(data["errors"][0].get("message"))
+    return data["data"]
+
+
+def fetch_fanduel(teams_needed):
+    """Projected minutes by team code, from the fewest FanDuel slates that cover tonight's teams."""
+    slates = fd_query(FD_SLATES, {"sport": "NBA"})["getSlates"] or []
+    # 'All Day' usually covers every game; fall back to the others, snake drafts last
+    slates.sort(key=lambda s: (0 if "all day" in s["name"].lower() else 2 if "snake" in s["name"].lower() else 1))
+    by_team, seen = {}, set()
+    for slate in slates[:8]:
+        rows = fd_query(FD_PROJECTIONS, {"input": {"type": "DAILY", "position": "NBA_PLAYER", "sport": "NBA",
+                                                   "slateId": slate["id"]}})["getProjections"] or []
+        for r in rows:
+            team = team_code(r["team"]["abbreviation"])
+            if (team, r["player"]["name"]) in seen:
+                continue
+            seen.add((team, r["player"]["name"]))
+            by_team.setdefault(team, []).append({
+                "name": r["player"]["name"], "pos": r["player"]["position"], "min": r["minutes"],
+                "pts": r["points"], "reb": r["rebounds"], "ast": r["assists"], "threes": r["threePointsMade"],
+            })
+        if teams_needed <= by_team.keys():
+            break
+        time.sleep(1)
+    return by_team
+
+
+def name_key(name):
+    words = re.sub(r"[^a-z ]", "", plain(name).replace("-", " ")).split()
+    return " ".join(w for w in words if w not in {"jr", "sr", "ii", "iii", "iv"})
+
+
+def find_projection(name, rows):
+    key = name_key(name)
+    for r in rows:
+        if name_key(r["name"]) == key:
+            return r
+    # 'Ronald Holland' vs 'Ron Holland II': fall back to a unique last name on the team
+    last = key.split()[-1] if key else ""
+    same_last = [r for r in rows if name_key(r["name"]).split()[-1:] == [last]]
+    return same_last[0] if len(same_last) == 1 else None
+
+
+def round_proj(r):
+    return {k: (round(r[k], 1) if r[k] is not None else None) for k in ("min", "pts", "reb", "ast", "threes")}
+
+
+def attach_projections(side, rows):
+    used = set()
+    for p in side["starters"] + side["mayNotPlay"]:
+        r = find_projection(p["name"], rows)
+        p["proj"] = round_proj(r) if r else None
+        if r:
+            used.add(r["name"])
+    listed = {name_key(p["name"]) for p in side["mayNotPlay"]}
+    bench = [r for r in rows if r["name"] not in used and name_key(r["name"]) not in listed
+             and (r["min"] or 0) >= BENCH_MIN_MINUTES]
+    bench.sort(key=lambda r: -(r["min"] or 0))
+    side["bench"] = [{"pos": r["pos"], "name": r["name"], "status": None, "playPct": None, "proj": round_proj(r)}
+                     for r in bench[:BENCH_MAX]]
+
+
 # ---------- StatMuse ----------
 
 def parse_statmuse(html, name):
@@ -203,10 +295,22 @@ def main():
     if not games:
         sys.exit("No games parsed from Rotowire; page layout may have changed.")
 
+    teams = {team_code(g[side]["abbr"]) for g in games for side in ("away", "home")}
+    print("Fetching FanDuel Research projections...")
+    try:
+        projections = fetch_fanduel(teams)
+        print(f"  {sum(len(v) for v in projections.values())} players across {len(projections)} teams")
+    except Exception as err:  # the board still works without projections
+        print(f"  FanDuel projections unavailable: {err}", file=sys.stderr)
+        projections = {}
+    for g in games:
+        for side in ("away", "home"):
+            attach_projections(g[side], projections.get(team_code(g[side]["abbr"]), []))
+
     players = {}
     for g in games:
         for side in ("away", "home"):
-            for p in g[side]["starters"] + g[side]["mayNotPlay"]:
+            for p in g[side]["starters"] + g[side]["mayNotPlay"] + g[side]["bench"]:
                 if p["status"] not in SKIP_STATS_FOR:
                     players[p["name"]] = None
 
@@ -225,7 +329,7 @@ def main():
 
     for g in games:
         for side in ("away", "home"):
-            for p in g[side]["starters"] + g[side]["mayNotPlay"]:
+            for p in g[side]["starters"] + g[side]["mayNotPlay"] + g[side]["bench"]:
                 p["last10"] = players.get(p["name"])
 
     data = {
@@ -233,6 +337,7 @@ def main():
         "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "games": games,
         "missingStats": failed,
+        "hasProjections": bool(projections),
     }
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(data, indent=1), encoding="utf-8")
