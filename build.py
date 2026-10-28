@@ -1,7 +1,7 @@
 """Build site/data.json for the NBA matchup board.
 
 Pulls tonight's lineups, injuries, odds and refs from Rotowire's public
-lineups page, player points/threes lines from Rotowire's props page,
+lineups page, player points/rebounds/assists/threes lines from Rotowire's props page,
 projected minutes from FanDuel Research, then each relevant player's last
 10 games from StatMuse.
 """
@@ -231,12 +231,12 @@ def attach_projections(side, rows):
 # ---------- Rotowire player props ----------
 
 PROPS_URL = "https://www.rotowire.com/betting/nba/player-props.php"
-PROP_TYPES = ["pts", "threes"]
+PROP_TYPES = ["pts", "reb", "ast", "threes"]
 PROP_BOOKS = ["fanduel", "draftkings", "mgm", "caesars", "betrivers", "hardrock", "thescore", "betr"]  # first with both sides wins
 
 
 def parse_props(html):
-    """Lines by (team, player key) -> {"pts": {...}, "threes": {...}} from the tables embedded in the props page."""
+    """Lines by (team, player key) -> {"pts": {...}, "reb": {...}, ...} from the tables embedded in the props page."""
     props = {}
     for m in re.finditer(r"data:\s*(\[.*?\])\s*,\s*\n", html, flags=re.S):
         try:
@@ -245,9 +245,9 @@ def parse_props(html):
             continue
         if not rows:
             continue
-        # single-prop tables only (the combined tables repeat the same lines)
-        kinds = [t for t in PROP_TYPES if f"fanduel_{t}" in rows[0]]
-        if len(kinds) != 1 or "fanduel_reb" in rows[0]:
+        # single-prop tables only: they carry over/under prices, the combined tables just repeat the lines
+        kinds = [t for t in PROP_TYPES if f"fanduel_{t}Over" in rows[0]]
+        if len(kinds) != 1:
             continue
         kind = kinds[0]
         for r in rows:

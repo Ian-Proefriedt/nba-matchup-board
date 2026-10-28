@@ -212,7 +212,8 @@ footer { color: var(--muted); font-size: .8rem; display: grid; gap: 4px; }
 <script>
 const state = { range: "10", data: null, open: null };
 const BOOKS = { fanduel: "FD", draftkings: "DK", mgm: "MGM", caesars: "CZR", betrivers: "BR", hardrock: "HR", thescore: "SCR", betr: "BETR" };
-const PROPS = [{ key: "pts", label: "PTS", name: "Points" }, { key: "threes", label: "3PM", name: "Threes" }];
+const PROPS = [{ key: "pts", label: "PTS", name: "Points" }, { key: "reb", label: "REB", name: "Rebounds" },
+               { key: "ast", label: "AST", name: "Assists" }, { key: "threes", label: "3PM", name: "Threes" }];
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const slug = s => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[.']/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const last10Url = n => `https://www.statmuse.com/nba/ask/${slug(n)}-last-10-games`;
@@ -299,7 +300,7 @@ function detail(p, opp) {
   const links = `<div class="links"><a href="${last10Url(p.name)}" target="_blank" rel="noopener">StatMuse last 10 ↗</a><a href="${vsUrl(p.name, opp.name)}" target="_blank" rel="noopener">Career vs ${esc(opp.abbr)} ↗</a></div>`;
   if (!p.last10) return `<div class="detail">${head}<span class="nodata">No StatMuse game log found.</span>${links}</div>`;
   const over = (x, key) => p.props && p.props[key] && x[key] != null && x[key] > p.props[key].line ? ` class="hit"` : "";
-  const rows = p.last10.games.slice().reverse().map(x => `<tr><td>${esc(x.date.replace(/\/\d{4}$/, ""))}</td><td>${x.homeAway === "@" ? "@" : "vs"} ${esc(x.opp)}</td><td>${fmt(x.min)}</td><td${over(x, "pts")}>${fmt(x.pts)}</td><td>${fmt(x.reb)}</td><td>${fmt(x.ast)}</td><td${over(x, "threes")}>${fmt(x.threes)}</td></tr>`).join("");
+  const rows = p.last10.games.slice().reverse().map(x => `<tr><td>${esc(x.date.replace(/\/\d{4}$/, ""))}</td><td>${x.homeAway === "@" ? "@" : "vs"} ${esc(x.opp)}</td><td>${fmt(x.min)}</td><td${over(x, "pts")}>${fmt(x.pts)}</td><td${over(x, "reb")}>${fmt(x.reb)}</td><td${over(x, "ast")}>${fmt(x.ast)}</td><td${over(x, "threes")}>${fmt(x.threes)}</td></tr>`).join("");
   const a = p.last10.avg;
   return `<div class="detail">${head}
     <div class="tablewrap"><table>
