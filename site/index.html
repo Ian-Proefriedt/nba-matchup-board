@@ -355,6 +355,7 @@ const STAT = { pts: "points", reb: "rebounds", ast: "assists", threes: "threes" 
 // Exact bet slip link when the build has one, else the book's NBA prop page for that stat
 function betUrl(book, kind, side, b) {
   if (b && b.links && b.links[side]) return b.links[side];
+  if (b && b.page) return b.page;  // DraftKings game page (ESPN supplies the event id)
   if (book === "fanduel") return `https://sportsbook.fanduel.com/navigation/nba?tab=player-${STAT[kind]}`;
   return `https://sportsbook.draftkings.com/leagues/basketball/nba?category=player-${STAT[kind]}&subcategory=${STAT[kind]}`;
 }
@@ -365,9 +366,9 @@ function betButton(p, kind, book, side, best) {
   const exact = !!(b.links && b.links[side]);
   const label = `${side} ${fmt(b.line)} ${STAT[kind]}`;
   const title = exact ? `Add ${p.name} ${label} to your ${BOOK_NAME[book]} bet slip`
-                      : `Open ${BOOK_NAME[book]}'s NBA player ${STAT[kind]} props; copies "${p.name}" to paste in search`;
+                      : `Open ${b.page ? "this game" : `NBA player ${STAT[kind]} props`} on ${BOOK_NAME[book]}; copies "${p.name}" to paste in search`;
   return `<a class="bk ${book}${best === false ? " off" : ""}" href="${esc(betUrl(book, kind, side, b))}" target="_blank" rel="noopener" title="${esc(title)}"${exact ? "" : ` data-copy="${esc(p.name)}"`} aria-label="${esc(`${BOOK_NAME[book]}: ${p.name} ${label} at ${price(b[side])}. ${exact ? "Adds to bet slip" : "Opens prop page"}`)}">
-    <span class="bn">${BOOK_NAME[book]}</span><span class="bl num">${side === "over" ? "O" : "U"} ${fmt(b.line)} <b>${price(b[side])}</b></span><span class="go" aria-hidden="true">${exact ? "Slip ↗" : "Props ↗"}</span>
+    <span class="bn">${BOOK_NAME[book]}</span><span class="bl num">${side === "over" ? "O" : "U"} ${fmt(b.line)} <b>${price(b[side])}</b></span><span class="go" aria-hidden="true">${exact ? "Slip ↗" : b.page ? "Game ↗" : "Props ↗"}</span>
     ${best ? `<span class="best">Best price</span>` : ""}
   </a>`;
 }
@@ -445,7 +446,7 @@ function legAt(l, book) {
   const pOver = m && m.pOverByBook ? m.pOverByBook[book] : null;
   return {
     line: b.line, price: b[l.side], exact: !!(b.links && b.links[l.side]), sid: b.sids && b.sids[l.side],
-    url: betUrl(book, l.kind, l.side, b), prob: pOver == null ? null : l.side === "over" ? pOver : 1 - pOver,
+    url: betUrl(book, l.kind, l.side, b), page: !!b.page, prob: pOver == null ? null : l.side === "over" ? pOver : 1 - pOver,
   };
 }
 
@@ -553,7 +554,7 @@ function sendView() {
   const legs = parlay.legs.map((l, i) => {
     const at = q.priced[i], done = !!parlay.done[i];
     return `<div class="leg${done ? " done" : ""}">
-      <span class="lw"><b>${i + 1}. ${esc(legText(l, at))}</b><span class="num">${price(at.price)} · ${at.exact ? "adds to your bet slip" : `${STAT[l.kind]} props · copies his name`}</span></span>
+      <span class="lw"><b>${i + 1}. ${esc(legText(l, at))}</b><span class="num">${price(at.price)} · ${at.exact ? "adds to your bet slip" : `${at.page ? "game page" : `${STAT[l.kind]} props`} · copies his name`}</span></span>
       <a class="bk ${book}" href="${esc(at.url)}" target="_blank" rel="noopener" data-done="${i}"${at.exact ? "" : ` data-copy="${esc(l.name)}"`}><span class="bn">${at.exact ? "Add" : "Open"}</span><span class="go">↗</span></a>
       <input type="checkbox" data-check="${i}" ${done ? "checked" : ""} aria-label="Leg ${i + 1} added">
     </div>`;

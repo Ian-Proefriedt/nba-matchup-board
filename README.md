@@ -35,6 +35,12 @@ These are statistical leans, not guarantees.
 
 FanDuel Research's public GraphQL (the same endpoint used for projected minutes, no key) also returns FanDuel Sportsbook's own `addToBetslip` link for every NBA player points/rebounds/assists/threes line (`fetch_fanduel_props`). Each build pulls it (one request for the whole league; FanDuel caches it 5 minutes) and those lines replace Rotowire's FanDuel lines, so FanDuel buttons put the exact bet on the slip with no setup. It's an undocumented FanDuel endpoint, so it could change; if it fails, FanDuel buttons fall back to the prop pages.
 
+## DraftKings bet slip ids (free key)
+
+- **Without a key:** ESPN's public scoreboard (DraftKings is ESPN's odds provider) gives each game's DraftKings event id, so DraftKings buttons open that game's page (`sportsbook.draftkings.com/event/<id>`). They also copy the player's name for DraftKings' search.
+- **With a free PropLine key:** sign up at [prop-line.com](https://prop-line.com) (email only, no card; 1,000 requests/day) and add the key as the repository secret `PROPLINE_API_KEY`. Each build then makes one request for the whole slate with `includeBookIds=true` (`fetch_propline_dk`), which returns DraftKings' own outcome ids. DraftKings buttons and the parlay confirm then fill the slip via `sportsbook.draftkings.com/?outcomes=<id>+<id>`. Refreshing every 30 minutes uses about 25 of the 1,000 daily requests.
+- The Odds API (`ODDS_API_KEY`) still works as an alternative, but its free tier is much smaller.
+
 ## Parlays
 
 Tap **+ Leg** on any over or under, in a suggested bet or a player's "Bets & game log" view, to add it to a parlay. A bar at the bottom shows the leg count and estimated odds. **Review** opens the parlay:

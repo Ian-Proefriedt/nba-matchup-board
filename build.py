@@ -4,8 +4,10 @@ Pulls tonight's lineups, injuries, odds and refs from Rotowire's public
 lineups page, player points/rebounds/assists/threes lines from Rotowire's props page,
 projected minutes from FanDuel Research, then each relevant player's last
 10 games from StatMuse. Each prop then gets a suggested side (see suggest()).
-FanDuel lines and bet slip links come free from FanDuel Research; DraftKings bet
-slip ids only when ODDS_API_KEY is set (The Odds API).
+FanDuel lines and bet slip links come free from FanDuel Research. DraftKings bet
+slip ids come from PropLine (free key, PROPLINE_API_KEY) or The Odds API
+(ODDS_API_KEY); without either, DraftKings buttons open the game's DraftKings page,
+found through ESPN's public scoreboard.
 """
 
 import json
@@ -19,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from statistics import mean, pstdev
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -481,6 +483,102 @@ def merge_book_lines(team, side, linked):
             p["props"][kind]["books"].update(books)
 
 
+# ---------- DraftKings: game pages (ESPN, free) and bet slip ids (PropLine, free key) ----------
+
+ESPN_SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+PROPLINE_ODDS = "https://api.prop-line.com/v1/sports/basketball_nba/odds"
+DK_EVENT = "https://sportsbook.draftkings.com/event/{event}"
+
+
+def get_json(url, headers=None):
+    req = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json", **(headers or {})})
+    with urlopen(req, timeout=30) as resp:
+        return json.load(resp)
+
+
+def espn_dk_events():
+    """{"AWAY@HOME": DraftKings event id} for today's and tomorrow's games.
+
+    DraftKings is ESPN's odds provider, and the scoreboard's DraftKings links carry DK's event id
+    (inside a gateway URL's preurl). Player-prop ids aren't there, so this only gets us the game page.
+    """
+    out = {}
+    slate = datetime.now(timezone.utc) - timedelta(hours=8)  # US slate date
+    for d in range(2):
+        day = (slate + timedelta(days=d)).strftime("%Y%m%d")
+        for ev in get_json(f"{ESPN_SCOREBOARD}?dates={day}").get("events", []):
+            comp = ev["competitions"][0]
+            teams = {c["homeAway"]: c["team"] for c in comp["competitors"]}
+            key = f"{team_code(teams['away']['abbreviation'])}@{team_code(teams['home']['abbreviation'])}"
+            for odds in comp.get("odds", []):
+                if (odds.get("provider") or {}).get("name") != "DraftKings":
+                    continue
+                for href in re.findall(r'"href": "(https://sportsbook\.draftkings\.com/gateway[^"]+)"', json.dumps(odds)):
+                    pre = unquote(parse_qs(urlparse(href).query).get("preurl", [""])[0])
+                    m = re.search(r"/event/(\d+)", pre)
+                    if m:
+                        out.setdefault(key, m.group(1))
+    return out
+
+
+def fetch_propline_dk(games):
+    """DraftKings points/rebounds/assists/threes with DK's own outcome ids, from PropLine's bulk /odds.
+
+    One request covers the whole slate (free tier: 1,000 requests/day, no card), so it's cheap enough
+    to run on every build. Same shape as fetch_odds_api, with sids for the one-link parlay slip.
+    """
+    params = {"markets": "player_points,player_rebounds,player_assists,player_threes", "bookmakers": "draftkings",
+              "includeBookIds": "true", "includeLinks": "true", "oddsFormat": "american"}
+    events = get_json(f"{PROPLINE_ODDS}?{urlencode(params)}", headers={"X-API-Key": os.environ["PROPLINE_API_KEY"]})
+    by_nick = {g[side]["name"].lower(): team_code(g[side]["abbr"]) for g in games for side in ("away", "home")}
+    now = datetime.now(timezone.utc)
+    out = {}
+    for ev in events:
+        if datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00")) <= now:
+            continue  # started: in-play lines, and DK re-issues ids in-play
+        codes = [c for full in (ev.get("home_team") or "", ev.get("away_team") or "")
+                 for nick, c in by_nick.items() if nick and full.lower().endswith(nick)]
+        for bm in ev.get("bookmakers", []):
+            if bm.get("key") != "draftkings":
+                continue
+            for mk in bm.get("markets", []):
+                kind = ODDS_API_MARKETS.get(mk.get("key"))
+                if not kind or mk.get("line_type") not in (None, "main"):
+                    continue
+                by_player = {}
+                for o in mk.get("outcomes", []):
+                    side = (o.get("name") or "").lower()
+                    sid = o.get("book_outcome_id") or o.get("outcome_id")
+                    if side in ("over", "under") and o.get("point") is not None and o.get("description") and sid:
+                        by_player.setdefault(o["description"], {}).setdefault(o["point"], {})[side] = {
+                            "price": o["price"], "sid": sid}
+                for player, pairs in by_player.items():
+                    line = main_line(pairs)
+                    if line is None:
+                        continue
+                    sides = pairs[line]
+                    sids = {k: sides[k]["sid"] for k in ("over", "under")}
+                    entry = {"line": float(line), "over": sides["over"]["price"], "under": sides["under"]["price"],
+                             "sids": sids, "links": {k: f"https://sportsbook.draftkings.com/?outcomes={quote(v, safe='')}"
+                                                     for k, v in sids.items()}}
+                    for code in codes:  # outcomes don't name a team; the player is on one of the two
+                        out.setdefault(f"{code}|{name_key(player)}", {}).setdefault(kind, {})["draftkings"] = entry
+    return out
+
+
+def attach_dk_pages(g, dk_events):
+    """Point each DraftKings line at its game's page, the fallback when there's no bet slip id."""
+    event = dk_events.get(f"{team_code(g['away']['abbr'])}@{team_code(g['home']['abbr'])}")
+    g["dkEvent"] = event
+    if not event:
+        return
+    for side in ("away", "home"):
+        for p in g[side]["starters"] + g[side]["mayNotPlay"] + g[side]["bench"]:
+            for prop in (p.get("props") or {}).values():
+                if "draftkings" in (prop.get("books") or {}):
+                    prop["books"]["draftkings"]["page"] = DK_EVENT.format(event=event)
+
+
 # ---------- Suggested bets ----------
 
 STRONG_EV, LEAN_EV = 0.10, 0.04  # expected profit per $1 staked
@@ -812,6 +910,21 @@ def main():
             print(f"  links for {len(linked)} players")
         except Exception as err:  # the board falls back to each book's prop pages
             print(f"  Odds API unavailable: {err}", file=sys.stderr)
+    dk_linked = {}
+    if os.environ.get("PROPLINE_API_KEY"):
+        print("Fetching DraftKings bet slip ids from PropLine...")
+        try:
+            dk_linked = fetch_propline_dk(games)
+            print(f"  ids for {len(dk_linked)} players")
+        except Exception as err:
+            print(f"  PropLine unavailable: {err}", file=sys.stderr)
+    print("Fetching DraftKings game pages from ESPN...")
+    try:
+        dk_events = espn_dk_events()
+        print(f"  {len(dk_events)} games")
+    except Exception as err:  # DraftKings buttons then open the NBA prop pages
+        print(f"  ESPN unavailable: {err}", file=sys.stderr)
+        dk_events = {}
     now = datetime.now(timezone.utc)
     for g in games:
         start = tipoff(slate_date, g["time"])
@@ -819,8 +932,10 @@ def main():
         g["started"] = bool(start and now >= start)
         for side in ("away", "home"):
             merge_book_lines(team_code(g[side]["abbr"]), g[side], linked)
+            merge_book_lines(team_code(g[side]["abbr"]), g[side], dk_linked)
             merge_book_lines(team_code(g[side]["abbr"]), g[side], fd_linked)  # FanDuel's own feed wins for FanDuel
             attach_suggestions(g[side], g["started"])
+        attach_dk_pages(g, dk_events)
 
     data = {
         "slateDate": slate_date,
@@ -828,7 +943,7 @@ def main():
         "games": games,
         "missingStats": failed,
         "hasProjections": bool(projections),
-        "hasBetLinks": bool(linked or fd_linked),
+        "hasBetLinks": bool(linked or fd_linked or dk_linked),
     }
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(data, indent=1), encoding="utf-8")

@@ -37,6 +37,8 @@ jobs:
         env:
           # Optional: The Odds API key for exact FanDuel/DraftKings bet slip links (Settings → Secrets → Actions)
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          # Optional, free: PropLine key for DraftKings bet slip ids (one request per build)
+          PROPLINE_API_KEY: ${{ secrets.PROPLINE_API_KEY }}
           ODDS_API_REFRESH_MIN: ${{ vars.ODDS_API_REFRESH_MIN }}
       - uses: actions/upload-pages-artifact@v3
         with:
