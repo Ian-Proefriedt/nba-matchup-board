@@ -31,6 +31,10 @@ These are statistical leans, not guarantees.
   - Cost: 4 credits per game (one per market). To save credits, the pull is cached and reused for `ODDS_API_REFRESH_MIN` minutes (default 180; set it as a repository variable). A 10-game night at the default is about 160–200 credits, which needs a paid plan. The free 500/month only covers a couple of nights.
   - If the key is missing or the API fails, the board falls back to the prop-page buttons.
 
+## FanDuel bet slip links (free)
+
+FanDuel Research's public GraphQL (the same endpoint used for projected minutes, no key) also returns FanDuel Sportsbook's own `addToBetslip` link for every NBA player points/rebounds/assists/threes line (`fetch_fanduel_props`). Each build pulls it (one request for the whole league; FanDuel caches it 5 minutes) and those lines replace Rotowire's FanDuel lines, so FanDuel buttons put the exact bet on the slip with no setup. It's an undocumented FanDuel endpoint, so it could change; if it fails, FanDuel buttons fall back to the prop pages.
+
 ## Parlays
 
 Tap **+ Leg** on any over or under, in a suggested bet or a player's "Bets & game log" view, to add it to a parlay. A bar at the bottom shows the leg count and estimated odds. **Review** opens the parlay:

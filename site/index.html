@@ -539,7 +539,8 @@ function slipUrl(book, priced) {
       return `https://sportsbook.draftkings.com/?outcomes=${ids.map(encodeURIComponent).join("+")}`;
     }
     if (!priced.every(x => x.exact)) return null;
-    return "https://sportsbook.fanduel.com/addToBetslip?" + priced.map((x, i) => {
+    const first = new URL(priced[0].url);  // FanDuel's own links use account.sportsbook.fanduel.com/sportsbook/addToBetslip
+    return `${first.origin}${first.pathname}?` + priced.map((x, i) => {
       const u = new URL(x.url);
       return `marketId[${i}]=${encodeURIComponent(u.searchParams.get("marketId"))}&selectionId[${i}]=${encodeURIComponent(u.searchParams.get("selectionId"))}`;
     }).join("&");

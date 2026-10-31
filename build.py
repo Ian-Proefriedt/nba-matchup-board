@@ -3,8 +3,9 @@
 Pulls tonight's lineups, injuries, odds and refs from Rotowire's public
 lineups page, player points/rebounds/assists/threes lines from Rotowire's props page,
 projected minutes from FanDuel Research, then each relevant player's last
-10 games from StatMuse. Each prop then gets a suggested side (see suggest()),
-and, when ODDS_API_KEY is set, exact FanDuel/DraftKings bet slip links from The Odds API.
+10 games from StatMuse. Each prop then gets a suggested side (see suggest()).
+FanDuel lines and bet slip links come free from FanDuel Research; DraftKings bet
+slip ids only when ODDS_API_KEY is set (The Odds API).
 """
 
 import json
@@ -232,6 +233,80 @@ def attach_projections(side, rows):
                      for r in bench[:BENCH_MAX]]
 
 
+# ---------- FanDuel Research: FanDuel lines + bet slip links (free) ----------
+
+# One request returns every team's players with FanDuel Sportsbook's main O/U markets for their next game.
+# FanDuel's CDN caches it for 5 min; in-play lines show up too, so started games are dropped.
+FD_PROPS = """query FdProps($start: CTP_Instant, $end: CTP_Instant) { ctp_Nba {
+  schedule(startDate: $start, endDate: $end) { games { scheduledTime odds { eventId } } }
+  teams { code players { name playerProps { events { eventId date markets {
+    marketType alternateMarket externalMarketId
+    selections { selectionId runnerName handicap odds betUrl } } } } } } } }"""
+# marketType looks like PLAYER_I_TOTAL_POINTS (the letter varies by player slot)
+FD_PROP_KINDS = {"TOTAL_POINTS": "pts", "TOTAL_REBOUNDS": "reb", "TOTAL_ASSISTS": "ast",
+                 "TOTAL_MADE_3_POINT_FIELD_GOALS": "threes"}
+FD_SLIP = "https://account.sportsbook.fanduel.com/sportsbook/addToBetslip?"
+
+
+def fd_american(odds):
+    s = (odds or "").strip().upper()
+    if s in ("EVEN", "EV"):
+        return 100
+    try:
+        return int(s.replace("+", ""))
+    except ValueError:
+        return None
+
+
+def fetch_fanduel_props(teams_needed):
+    """{"TEAM|player key": {kind: {"fanduel": {line, over, under, links}}}} for games not yet started.
+
+    links are FanDuel's own addToBetslip URLs (marketId + selectionId), which the page also
+    combines into one multi-leg slip link.
+    """
+    now = datetime.now(timezone.utc)
+    iso = lambda t: t.strftime("%Y-%m-%dT%H:%M:%SZ")
+    data = fd_query(FD_PROPS, {"start": iso(now - timedelta(hours=12)), "end": iso(now + timedelta(days=2))})["ctp_Nba"]
+    tip = {}
+    for sched in data.get("schedule") or []:
+        for g in sched.get("games") or []:
+            if (g.get("odds") or {}).get("eventId") and g.get("scheduledTime"):
+                tip[g["odds"]["eventId"]] = datetime.fromisoformat(g["scheduledTime"].replace("Z", "+00:00"))
+    out = {}
+    for t in data.get("teams") or []:
+        team = team_code(t["code"])
+        if team not in teams_needed:
+            continue
+        for p in t.get("players") or []:
+            upcoming = []
+            for ev in ((p.get("playerProps") or {}).get("events")) or []:
+                start = tip.get(ev["eventId"]) or datetime.fromisoformat(ev["date"].replace("Z", "+00:00"))
+                if start > now:
+                    upcoming.append((start, ev))
+            if not upcoming:
+                continue
+            ev = min(upcoming, key=lambda x: x[0])[1]  # next game only
+            for m in ev.get("markets") or []:
+                kind = FD_PROP_KINDS.get(re.sub(r"^PLAYER_[A-Z]_", "", m.get("marketType") or ""))
+                if not kind or m.get("alternateMarket"):
+                    continue
+                sides = {}
+                for sel in m.get("selections") or []:
+                    side = (sel.get("runnerName") or "").rsplit(" ", 1)[-1].lower()
+                    if side in ("over", "under") and sel.get("handicap") is not None:
+                        sides[side] = sel
+                if len(sides) != 2 or None in (fd_american(sides["over"]["odds"]), fd_american(sides["under"]["odds"])):
+                    continue
+                link = lambda sel: sel.get("betUrl") or FD_SLIP + urlencode(
+                    {"marketId": m["externalMarketId"], "selectionId": sel["selectionId"]})
+                out.setdefault(f"{team}|{name_key(p['name'])}", {})[kind] = {"fanduel": {
+                    "line": float(sides["over"]["handicap"]),
+                    "over": fd_american(sides["over"]["odds"]), "under": fd_american(sides["under"]["odds"]),
+                    "links": {"over": link(sides["over"]), "under": link(sides["under"])},
+                }}
+    return out
+
+
 # ---------- Rotowire player props ----------
 
 PROPS_URL = "https://www.rotowire.com/betting/nba/player-props.php"
@@ -392,8 +467,8 @@ def load_odds_api(games):
     return players
 
 
-def merge_odds_api(team, side, linked):
-    """Overlay The Odds API's FanDuel/DraftKings lines (they carry bet slip links) onto Rotowire's."""
+def merge_book_lines(team, side, linked):
+    """Overlay book lines that carry bet slip links (FanDuel Research, The Odds API) onto Rotowire's."""
     for p in side["starters"] + side["mayNotPlay"] + side["bench"]:
         found = linked.get(f"{team}|{name_key(p['name'])}")
         if not found:
@@ -722,9 +797,16 @@ def main():
             for p in g[side]["starters"] + g[side]["mayNotPlay"] + g[side]["bench"]:
                 p["last10"] = players.get(p["name"])
 
+    print("Fetching FanDuel lines and bet slip links from FanDuel Research...")
+    try:
+        fd_linked = fetch_fanduel_props(teams)
+        print(f"  links for {len(fd_linked)} players")
+    except Exception as err:  # the board falls back to FanDuel's prop pages
+        print(f"  FanDuel props unavailable: {err}", file=sys.stderr)
+        fd_linked = {}
     linked = {}
     if os.environ.get("ODDS_API_KEY"):
-        print("Fetching FanDuel/DraftKings bet slip links from The Odds API...")
+        print("Fetching DraftKings bet slip ids from The Odds API...")
         try:
             linked = load_odds_api(games)
             print(f"  links for {len(linked)} players")
@@ -736,7 +818,8 @@ def main():
         g["tipoff"] = start.isoformat() if start else None
         g["started"] = bool(start and now >= start)
         for side in ("away", "home"):
-            merge_odds_api(team_code(g[side]["abbr"]), g[side], linked)
+            merge_book_lines(team_code(g[side]["abbr"]), g[side], linked)
+            merge_book_lines(team_code(g[side]["abbr"]), g[side], fd_linked)  # FanDuel's own feed wins for FanDuel
             attach_suggestions(g[side], g["started"])
 
     data = {
@@ -745,7 +828,7 @@ def main():
         "games": games,
         "missingStats": failed,
         "hasProjections": bool(projections),
-        "hasBetLinks": bool(linked),
+        "hasBetLinks": bool(linked or fd_linked),
     }
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(data, indent=1), encoding="utf-8")
