@@ -380,6 +380,7 @@ const legId = l => `${l.g}|${l.name}|${l.kind}`;
 const decimal = n => n > 0 ? 1 + n / 100 : 1 + 100 / -n;
 const toAmerican = d => d >= 2 ? Math.round((d - 1) * 100) : Math.round(-100 / (d - 1));
 const money = n => `$${n.toFixed(2)}`;
+const possessive = n => n + (n.endsWith("s") ? "'" : "'s");
 
 function buildIndex() {
   INDEX = {};
@@ -558,7 +559,7 @@ function sendView() {
     <p class="note">Confirmed: <b>${n}-leg parlay</b>, est. <b class="num">${price(q.american)}</b>, <b>${money(parlay.stake)}</b> to win <b>${money(parlay.stake * (q.dec - 1))}</b>.
     ${auto ? `${parlay.opened ? `${BOOK_NAME[book]} should have opened with all ${n} legs on your bet slip.` : `<b>Build slip</b> puts all ${n} legs on your ${BOOK_NAME[book]} bet slip.`} Nothing is placed until you tap Place Bet there. If a leg is missing (the book may have moved that line), add it below.`
       : exact ? `Tap <b>Add</b> on each leg to put it on your ${BOOK_NAME[book]} bet slip.`
-            : `${BOOK_NAME[book]} only takes bets placed in its own app, so add each leg there: <b>Open</b> goes to that stat's player props, then tap the player's line.`}</p>
+            : `The board can't fill your ${BOOK_NAME[book]} slip yet: that needs ${possessive(BOOK_NAME[book])} bet IDs, which come with an Odds API key. For now, add each leg yourself: <b>Open</b> goes to that stat's player props, then tap the player's line.`}</p>
     <div class="legs">${legs}</div>
     ${all ? `<p class="note" style="color:var(--up)"><b>All ${n} legs added.</b> In ${BOOK_NAME[book]}, open the bet slip, choose <b>Parlay</b>, enter ${money(parlay.stake)}, and check that the lines and odds match before you place it.</p>` : ""}
     ${auto ? `<a class="cta ${book}" href="${esc(combo)}" target="_blank" rel="noopener">${parlay.opened ? "Build slip again" : "Build slip"} in ${BOOK_NAME[book]} ↗</a>`
