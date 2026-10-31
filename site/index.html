@@ -264,6 +264,11 @@ dialog.sheet::backdrop { background: rgba(5, 10, 18, .55); }
 .ghost { min-height: 44px; flex: 1; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer; font-weight: 600; color: var(--ink); text-align: center; display: grid; place-items: center; }
 @media (prefers-color-scheme: dark) { .cta { color: #06121f; } }
 
+.toast {
+  position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 30;
+  max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 10px; background: var(--ink); color: var(--bg); font-size: .85rem; font-weight: 600;
+}
+
 .betblock { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
 .betblock:first-of-type { border-top: 0; padding-top: 0; }
 .betblock .bh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: .85rem; }
@@ -317,6 +322,7 @@ footer { color: var(--muted); font-size: .8rem; display: grid; gap: 4px; }
   <main id="games"><div class="state">Loading…</div></main>
   <div class="pbar" id="pbar" hidden><button type="button" id="openpar"></button></div>
   <dialog class="sheet" id="sheet" aria-labelledby="sheet-title"></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <footer>
     <span><b>Orange pill</b>: FanDuel Research projected minutes (▲▼ when 3+ off his recent average). Gray numbers are averages over his last 10 or 5 games from StatMuse.</span>
     <span><b>Prop chips</b>: the line (FanDuel unless marked) and how often he went over it in his last 10 or 5 games. Green = 70%+, red = 30% or less. A green border with O or U marks a suggested over or under (dashed = lean).</span>
@@ -359,9 +365,9 @@ function betButton(p, kind, book, side, best) {
   const exact = !!(b.links && b.links[side]);
   const label = `${side} ${fmt(b.line)} ${STAT[kind]}`;
   const title = exact ? `Add ${p.name} ${label} to your ${BOOK_NAME[book]} bet slip`
-                      : `Open ${BOOK_NAME[book]}'s NBA player ${STAT[kind]} props and find ${p.name}`;
-  return `<a class="bk ${book}${best === false ? " off" : ""}" href="${esc(betUrl(book, kind, side, b))}" target="_blank" rel="noopener" title="${esc(title)}" aria-label="${esc(`${BOOK_NAME[book]}: ${p.name} ${label} at ${price(b[side])}. ${exact ? "Adds to bet slip" : "Opens prop page"}`)}">
-    <span class="bn">${BOOK_NAME[book]}</span><span class="bl num">${side === "over" ? "O" : "U"} ${fmt(b.line)} <b>${price(b[side])}</b></span><span class="go" aria-hidden="true">${exact ? "Slip ↗" : "↗"}</span>
+                      : `Open ${BOOK_NAME[book]}'s NBA player ${STAT[kind]} props; copies "${p.name}" to paste in search`;
+  return `<a class="bk ${book}${best === false ? " off" : ""}" href="${esc(betUrl(book, kind, side, b))}" target="_blank" rel="noopener" title="${esc(title)}"${exact ? "" : ` data-copy="${esc(p.name)}"`} aria-label="${esc(`${BOOK_NAME[book]}: ${p.name} ${label} at ${price(b[side])}. ${exact ? "Adds to bet slip" : "Opens prop page"}`)}">
+    <span class="bn">${BOOK_NAME[book]}</span><span class="bl num">${side === "over" ? "O" : "U"} ${fmt(b.line)} <b>${price(b[side])}</b></span><span class="go" aria-hidden="true">${exact ? "Slip ↗" : "Props ↗"}</span>
     ${best ? `<span class="best">Best price</span>` : ""}
   </a>`;
 }
@@ -546,8 +552,8 @@ function sendView() {
   const legs = parlay.legs.map((l, i) => {
     const at = q.priced[i], done = !!parlay.done[i];
     return `<div class="leg${done ? " done" : ""}">
-      <span class="lw"><b>${i + 1}. ${esc(legText(l, at))}</b><span class="num">${price(at.price)} · ${exact ? "adds to your bet slip" : `on the ${STAT[l.kind]} tab`}</span></span>
-      <a class="bk ${book}" href="${esc(at.url)}" target="_blank" rel="noopener" data-done="${i}"><span class="bn">${exact ? "Add" : "Open"}</span><span class="go">↗</span></a>
+      <span class="lw"><b>${i + 1}. ${esc(legText(l, at))}</b><span class="num">${price(at.price)} · ${at.exact ? "adds to your bet slip" : `${STAT[l.kind]} props · copies his name`}</span></span>
+      <a class="bk ${book}" href="${esc(at.url)}" target="_blank" rel="noopener" data-done="${i}"${at.exact ? "" : ` data-copy="${esc(l.name)}"`}><span class="bn">${at.exact ? "Add" : "Open"}</span><span class="go">↗</span></a>
       <input type="checkbox" data-check="${i}" ${done ? "checked" : ""} aria-label="Leg ${i + 1} added">
     </div>`;
   }).join("");
@@ -559,7 +565,7 @@ function sendView() {
     <p class="note">Confirmed: <b>${n}-leg parlay</b>, est. <b class="num">${price(q.american)}</b>, <b>${money(parlay.stake)}</b> to win <b>${money(parlay.stake * (q.dec - 1))}</b>.
     ${auto ? `${parlay.opened ? `${BOOK_NAME[book]} should have opened with all ${n} legs on your bet slip.` : `<b>Build slip</b> puts all ${n} legs on your ${BOOK_NAME[book]} bet slip.`} Nothing is placed until you tap Place Bet there. If a leg is missing (the book may have moved that line), add it below.`
       : exact ? `Tap <b>Add</b> on each leg to put it on your ${BOOK_NAME[book]} bet slip.`
-            : `The board can't fill your ${BOOK_NAME[book]} slip yet: that needs ${possessive(BOOK_NAME[book])} bet IDs, which come with an Odds API key. For now, add each leg yourself: <b>Open</b> goes to that stat's player props, then tap the player's line.`}</p>
+            : `The board can't fill your ${BOOK_NAME[book]} slip yet: that needs ${possessive(BOOK_NAME[book])} bet IDs, which come with an Odds API key. For now, add each leg yourself: <b>Open</b> goes to that stat's player props and copies the player's name, so paste it into ${possessive(BOOK_NAME[book])} search and tap his line.`}</p>
     <div class="legs">${legs}</div>
     ${all ? `<p class="note" style="color:var(--up)"><b>All ${n} legs added.</b> In ${BOOK_NAME[book]}, open the bet slip, choose <b>Parlay</b>, enter ${money(parlay.stake)}, and check that the lines and odds match before you place it.</p>` : ""}
     ${auto ? `<a class="cta ${book}" href="${esc(combo)}" target="_blank" rel="noopener">${parlay.opened ? "Build slip again" : "Build slip"} in ${BOOK_NAME[book]} ↗</a>`
@@ -574,7 +580,9 @@ function renderSheet() {
   const sheet = document.getElementById("sheet");
   if (!parlay.legs.length) { if (sheet.open) sheet.close(); return; }
   if (parlay.step === "send" && parlayAt(parlay.book).missing) parlay.step = "review";
+  const t = document.getElementById("toast");
   sheet.innerHTML = parlay.step === "send" ? sendView() : reviewView();
+  if (t && !t.isConnected) sheet.appendChild(t);  // the toast may live in the sheet; keep it across redraws
 }
 
 function openSheet() {
@@ -847,7 +855,24 @@ async function load() {
   setRange(state.range);
 }
 
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById("toast");
+  const sheet = document.getElementById("sheet");
+  (sheet.open ? sheet : document.body).appendChild(el);  // an open modal covers anything outside it
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 4000);
+}
+
 document.addEventListener("click", e => {
+  // Prop-page links can't open the exact prop without the book's ids, so hand over the name for its search
+  const copy = e.target.closest("a[data-copy]");
+  if (copy) {
+    const name = copy.dataset.copy;
+    try { navigator.clipboard.writeText(name).then(() => toast(`Copied "${name}". Paste it into the book's search.`), () => {}); } catch (err) {}
+  }
   const leg = e.target.closest(".addleg");
   if (leg) {
     // Keep the tapped button where it is: re-render, then put focus back on the same toggle
