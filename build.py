@@ -3,10 +3,13 @@
 Pulls tonight's lineups, injuries, odds and refs from Rotowire's public
 lineups page, player points/rebounds/assists/threes lines from Rotowire's props page,
 projected minutes from FanDuel Research, then each relevant player's last
-10 games from StatMuse.
+10 games from StatMuse. Each prop then gets a suggested side (see suggest()),
+and, when ODDS_API_KEY is set, exact FanDuel/DraftKings bet slip links from The Odds API.
 """
 
 import json
+import math
+import os
 import re
 import sys
 import time
@@ -14,7 +17,8 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from statistics import mean
+from statistics import mean, pstdev
+from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -235,8 +239,15 @@ PROP_TYPES = ["pts", "reb", "ast", "threes"]
 PROP_BOOKS = ["fanduel", "draftkings", "mgm", "caesars", "betrivers", "hardrock", "thescore", "betr"]  # first with both sides wins
 
 
+LINK_BOOKS = ["fanduel", "draftkings"]  # books the board links out to
+
+
 def parse_props(html):
-    """Lines by (team, player key) -> {"pts": {...}, "reb": {...}, ...} from the tables embedded in the props page."""
+    """Lines by (team, player key) -> {"pts": {...}, "reb": {...}, ...} from the tables embedded in the props page.
+
+    The top-level line/over/under is the first book in PROP_BOOKS with both sides; "books" keeps
+    every FanDuel and DraftKings line so the board can compare prices and link to either.
+    """
     props = {}
     for m in re.finditer(r"data:\s*(\[.*?\])\s*,\s*\n", html, flags=re.S):
         try:
@@ -251,12 +262,19 @@ def parse_props(html):
             continue
         kind = kinds[0]
         for r in rows:
+            found, books = None, {}
             for book in PROP_BOOKS:
                 line, over, under = r.get(f"{book}_{kind}"), r.get(f"{book}_{kind}Over"), r.get(f"{book}_{kind}Under")
-                if line and over and under:
-                    key = (team_code(r.get("team", "")), name_key(r.get("name", "")))
-                    props.setdefault(key, {})[kind] = {"line": float(line), "over": int(over), "under": int(under), "book": book}
-                    break
+                if not (line and over and under):
+                    continue
+                entry = {"line": float(line), "over": int(over), "under": int(under)}
+                if found is None:
+                    found = {**entry, "book": book}
+                if book in LINK_BOOKS:
+                    books[book] = entry
+            if found:
+                key = (team_code(r.get("team", "")), name_key(r.get("name", "")))
+                props.setdefault(key, {})[kind] = {**found, "books": books}
     return props
 
 
@@ -270,6 +288,286 @@ def attach_props(team, side, props):
             same = [v for k, v in team_props.items() if k.split()[-1:] == last]
             found = same[0] if len(same) == 1 else None
         p["props"] = found
+
+
+# ---------- The Odds API: exact bet slip links (optional) ----------
+
+ODDS_API = "https://api.the-odds-api.com/v4/sports/basketball_nba"
+ODDS_API_MARKETS = {"player_points": "pts", "player_rebounds": "reb", "player_assists": "ast", "player_threes": "threes"}
+ODDS_API_CACHE = Path(__file__).parent / "cache" / "oddsapi.json"
+# Each game costs one credit per market returned (4 per game), so don't re-pull on every 30-minute run
+ODDS_API_REFRESH_MIN = int(os.environ.get("ODDS_API_REFRESH_MIN") or 180)
+
+
+def odds_api_get(path, **params):
+    url = f"{ODDS_API}{path}?{urlencode({**params, 'apiKey': os.environ['ODDS_API_KEY']})}"
+    with urlopen(Request(url, headers={"User-Agent": USER_AGENT}), timeout=30) as resp:
+        left = resp.headers.get("x-requests-remaining")
+        if left is not None:
+            print(f"  Odds API credits left: {left}")
+        return json.load(resp)
+
+
+def main_line(pairs):
+    """Of several (over, under) pairs at different lines, the one priced closest to even is the main line."""
+    best = None
+    for line, sides in pairs.items():
+        if "over" in sides and "under" in sides:
+            gap = abs(implied(sides["over"]["price"]) - implied(sides["under"]["price"]))
+            if best is None or gap < best[0]:
+                best = (gap, line)
+    return best and best[1]
+
+
+def fetch_odds_api(games):
+    """{"TEAM|player key": {kind: {book: {line, over, under, links}}}} for FanDuel and DraftKings."""
+    events = odds_api_get("/events")  # free: doesn't count against the quota
+    by_nick = {}
+    for g in games:
+        for side in ("away", "home"):
+            by_nick[g[side]["name"].lower()] = team_code(g[side]["abbr"])
+    out = {}
+    for ev in events:
+        teams = {}
+        for full in (ev["home_team"], ev["away_team"]):
+            code = next((c for nick, c in by_nick.items() if nick and full.lower().endswith(nick)), None)
+            if code:
+                teams[full] = code
+        if len(teams) != 2:
+            continue  # not on tonight's board
+        data = odds_api_get(f"/events/{ev['id']}/odds", bookmakers=",".join(LINK_BOOKS),
+                            markets=",".join(ODDS_API_MARKETS), oddsFormat="american", includeLinks="true")
+        for bm in data.get("bookmakers", []):
+            for mk in bm.get("markets", []):
+                kind = ODDS_API_MARKETS.get(mk["key"])
+                if not kind:
+                    continue
+                by_player = {}
+                for o in mk.get("outcomes", []):
+                    side = (o.get("name") or "").lower()
+                    if side not in ("over", "under") or o.get("point") is None or not o.get("description"):
+                        continue
+                    link = o.get("link") or mk.get("link") or bm.get("link")
+                    by_player.setdefault(o["description"], {}).setdefault(o["point"], {})[side] = {"price": o["price"], "link": link}
+                for player, pairs in by_player.items():
+                    line = main_line(pairs)
+                    if line is None:
+                        continue
+                    sides = pairs[line]
+                    entry = {"line": float(line), "over": sides["over"]["price"], "under": sides["under"]["price"],
+                             "links": {"over": sides["over"]["link"], "under": sides["under"]["link"]}}
+                    # outcomes don't name a team; the player is on one of the two in this game
+                    for code in teams.values():
+                        out.setdefault(f"{code}|{name_key(player)}", {}).setdefault(kind, {})[bm["key"]] = entry
+        time.sleep(0.5)
+    return out
+
+
+def load_odds_api(games):
+    """Bet slip lines/links, re-pulled at most every ODDS_API_REFRESH_MIN minutes. Empty without a key."""
+    if not os.environ.get("ODDS_API_KEY"):
+        return {}
+    try:
+        saved = json.loads(ODDS_API_CACHE.read_text(encoding="utf-8"))
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(saved["fetchedAt"])
+        if saved.get("day") == cache_day() and age < timedelta(minutes=ODDS_API_REFRESH_MIN):
+            print(f"  using Odds API pull from {int(age.total_seconds() // 60)} min ago")
+            return saved["players"]
+    except (OSError, ValueError, KeyError):
+        pass
+    players = fetch_odds_api(games)
+    ODDS_API_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    ODDS_API_CACHE.write_text(json.dumps({"day": cache_day(), "fetchedAt": datetime.now(timezone.utc).isoformat(),
+                                          "players": players}), encoding="utf-8")
+    return players
+
+
+def merge_odds_api(team, side, linked):
+    """Overlay The Odds API's FanDuel/DraftKings lines (they carry bet slip links) onto Rotowire's."""
+    for p in side["starters"] + side["mayNotPlay"] + side["bench"]:
+        found = linked.get(f"{team}|{name_key(p['name'])}")
+        if not found:
+            continue
+        p["props"] = p["props"] or {}
+        for kind, books in found.items():
+            if kind not in p["props"]:
+                first = next(iter(books.items()))
+                p["props"][kind] = {**{k: first[1][k] for k in ("line", "over", "under")}, "book": first[0], "books": {}}
+            p["props"][kind]["books"].update(books)
+
+
+# ---------- Suggested bets ----------
+
+STRONG_EV, LEAN_EV = 0.10, 0.04  # expected profit per $1 staked
+MIN_GAMES = 5
+MARKET_WEIGHT = 0.6  # books are sharp: the model only gets to move their no-vig price part of the way
+MAX_DISAGREE = 0.22  # a raw model this far from the book usually means a live/stale line or bad data, not an edge
+SHAKY_STATUS = {"GTD", "Ques", "Doubt", "Prob"}
+KIND_NAME = {"pts": "points", "reb": "rebounds", "ast": "assists", "threes": "threes"}
+
+
+def implied(price):
+    return 100 / (price + 100) if price > 0 else -price / (-price + 100)
+
+
+def payout(price):
+    """Profit on a $1 win."""
+    return price / 100 if price > 0 else 100 / -price
+
+
+def american(prob):
+    prob = min(max(prob, 0.01), 0.99)
+    return round(-100 * prob / (1 - prob)) if prob >= 0.5 else round(100 * (1 - prob) / prob)
+
+
+def p_over_normal(mu, sigma, line):
+    return 0.5 * math.erfc((line - mu) / (sigma * math.sqrt(2)))
+
+
+def p_over_poisson(mu, line):
+    # P(X > line) for a count: 1 - P(X <= floor(line))
+    mu = max(mu, 0.05)
+    term = cdf = math.exp(-mu)
+    for k in range(1, int(math.floor(line)) + 1):
+        term *= mu / k
+        cdf += term
+    return max(0.0, 1 - cdf)
+
+
+def suggest(p, kind, started=False):
+    """Model probability of the over for one prop, and the best FanDuel/DraftKings side to bet if there's an edge.
+
+    The expected stat blends three estimates: FanDuel Research's projection, his per-minute rate over the
+    last 10 times tonight's projected minutes, and a recency-weighted average (last 5 count double).
+    That mean gives a distribution probability (normal, or Poisson for threes); it's averaged with a
+    recency-weighted hit rate shrunk toward 50%, then pulled most of the way back to each book's no-vig price.
+    No pick once the game has started (Rotowire then shows live lines) or when the raw model and the book
+    disagree by more than MAX_DISAGREE.
+    """
+    prop = p["props"][kind]
+    games = [g for g in (p.get("last10") or {}).get("games", []) if g.get(kind) is not None and g.get("min")]
+    books = prop.get("books") or {}
+    if len(games) < MIN_GAMES or not books or p.get("status") in SKIP_STATS_FOR:
+        return None
+    vals = [g[kind] for g in games]
+    weights = [2.0 if i >= len(games) - 5 else 1.0 for i in range(len(games))]
+    wavg = sum(v * w for v, w in zip(vals, weights)) / sum(weights)
+    recent_min = mean(g["min"] for g in games)
+    proj = p.get("proj") or {}
+    proj_min = proj.get("min") or recent_min
+    per_min = sum(vals) / sum(g["min"] for g in games)
+    min_adj = per_min * proj_min
+    if proj.get(kind) is not None:
+        mu = 0.4 * proj[kind] + 0.35 * min_adj + 0.25 * wavg
+    else:
+        mu = 0.6 * min_adj + 0.4 * wavg
+    sigma = max(pstdev(vals), math.sqrt(max(mu, 0.5)), 0.8)
+
+    best = None
+    for book, b in books.items():
+        line = b["line"]
+        p_dist = p_over_poisson(mu, line) if kind == "threes" else p_over_normal(mu, sigma, line)
+        w_hits = sum(w for v, w in zip(vals, weights) if v > line)
+        p_hist = (w_hits + 2) / (sum(weights) + 4)
+        fair_over = implied(b["over"]) / (implied(b["over"]) + implied(b["under"]))
+        raw = 0.6 * p_dist + 0.4 * p_hist
+        p_over = (1 - MARKET_WEIGHT) * raw + MARKET_WEIGHT * fair_over
+        for side, prob, fair, price in (("over", p_over, fair_over, b["over"]), ("under", 1 - p_over, 1 - fair_over, b["under"])):
+            ev = prob * payout(price) - (1 - prob)
+            if best is None or ev > best["ev"]:
+                best = {"side": side, "book": book, "line": line, "price": price, "prob": prob, "fair": fair, "ev": ev,
+                        "pOver": p_over, "off": abs(raw - fair_over) > MAX_DISAGREE}
+
+    ev = best["ev"]
+    grade = "strong" if ev >= STRONG_EV else "lean" if ev >= LEAN_EV else None
+    if started or best["off"]:
+        grade = None
+    shaky = p.get("status") in SHAKY_STATUS
+    if grade == "strong" and shaky:
+        grade = "lean"
+    line, side, over = best["line"], best["side"], best["side"] == "over"
+    hits10 = sum(v > line for v in vals)
+    hits5 = sum(v > line for v in vals[-5:])
+    n5 = len(vals[-5:])
+    avg5 = mean(vals[-5:])
+    avg10 = mean(vals)
+    label = KIND_NAME[kind]
+
+    reasons = []
+    went = hits10 if over else len(vals) - hits10
+    went5 = hits5 if over else n5 - hits5
+    if len(vals) > n5:
+        reasons.append(f"Went {side} {fmt_line(line)} in {went} of last {len(vals)} ({went5} of last {n5})")
+        reasons.append(f"Averaging {avg10:.1f} {label} over his last {len(vals)}, {avg5:.1f} over his last {n5}")
+    else:
+        reasons.append(f"Went {side} {fmt_line(line)} in {went} of last {len(vals)}")
+        reasons.append(f"Averaging {avg10:.1f} {label} over his last {len(vals)}")
+    if proj.get(kind) is not None:
+        reasons.append(f"FanDuel Research projects {proj[kind]:.1f}")
+    if proj.get("min") and abs(proj["min"] - recent_min) >= 2:
+        more = proj["min"] > recent_min
+        reasons.append(f"Projected {proj['min']:.0f} min, {'up' if more else 'down'} from {recent_min:.1f} recently"
+                       + ("" if more == over else " (works against this pick)"))
+    reasons.append(f"Model has the {side} at {best['prob'] * 100:.0f}%; the {book_name(best['book'])} price implies "
+                   f"{best['fair'] * 100:.0f}% (fair price {fmt_price(american(best['prob']))})")
+    for bk, b in books.items():
+        if bk == best["book"]:
+            continue
+        if b["line"] == line:
+            if b[side] != best["price"]:
+                reasons.append(f"Better price than {book_name(bk)} ({fmt_price(best['price'])} vs {fmt_price(b[side])})")
+        elif (b["line"] < line) == over:  # the other book's number is easier, but its price is worse
+            reasons.append(f"{book_name(bk)} has an easier {fmt_line(b['line'])} at {fmt_price(b[side])}, "
+                           f"but {possessive(book_name(best['book']))} price is the better value")
+        else:
+            reasons.append(f"Better number than {book_name(bk)} ({fmt_line(line)} vs {fmt_line(b['line'])})")
+    cautions = []
+    if started:
+        cautions.append("Game has started: these are live lines, so no pick")
+    elif best["off"]:
+        cautions.append("History and the book disagree too much to trust: the line may have moved or be live, so no pick")
+    if shaky:
+        cautions.append(f"Listed {p['status']}: check he's playing before you bet")
+    if len(vals) < 10:
+        cautions.append(f"Only {len(vals)} games of history")
+
+    return {
+        "side": side, "book": best["book"], "line": line, "price": best["price"],
+        "prob": round(best["prob"], 3), "fair": round(best["fair"], 3), "ev": round(ev, 3),
+        "pOver": round(best["pOver"], 3), "mean": round(mu, 1), "grade": grade,
+        "reasons": reasons, "cautions": cautions,
+    }
+
+
+def fmt_line(x):
+    return f"{x:g}"
+
+
+def fmt_price(n):
+    return f"+{n}" if n > 0 else str(n)
+
+
+def book_name(book):
+    return {"fanduel": "FanDuel", "draftkings": "DraftKings"}.get(book, book)
+
+
+def possessive(name):
+    return name + ("'" if name.endswith("s") else "'s")
+
+
+def tipoff(slate_date, game_time):
+    """Tip-off as an aware datetime, from 'October 30, 2026' and '7:30 PM ET'; None if either won't parse."""
+    try:
+        naive = datetime.strptime(f"{slate_date} {game_time.replace('ET', '').strip()}", "%B %d, %Y %I:%M %p")
+    except (TypeError, ValueError):
+        return None
+    return naive.replace(tzinfo=ZoneInfo("America/New_York"))
+
+
+def attach_suggestions(side, started):
+    for p in side["starters"] + side["mayNotPlay"] + side["bench"]:
+        for kind in (p.get("props") or {}):
+            p["props"][kind]["model"] = suggest(p, kind, started)
 
 
 # ---------- StatMuse ----------
@@ -413,12 +711,30 @@ def main():
             for p in g[side]["starters"] + g[side]["mayNotPlay"] + g[side]["bench"]:
                 p["last10"] = players.get(p["name"])
 
+    linked = {}
+    if os.environ.get("ODDS_API_KEY"):
+        print("Fetching FanDuel/DraftKings bet slip links from The Odds API...")
+        try:
+            linked = load_odds_api(games)
+            print(f"  links for {len(linked)} players")
+        except Exception as err:  # the board falls back to each book's prop pages
+            print(f"  Odds API unavailable: {err}", file=sys.stderr)
+    now = datetime.now(timezone.utc)
+    for g in games:
+        start = tipoff(slate_date, g["time"])
+        g["tipoff"] = start.isoformat() if start else None
+        g["started"] = bool(start and now >= start)
+        for side in ("away", "home"):
+            merge_odds_api(team_code(g[side]["abbr"]), g[side], linked)
+            attach_suggestions(g[side], g["started"])
+
     data = {
         "slateDate": slate_date,
         "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "games": games,
         "missingStats": failed,
         "hasProjections": bool(projections),
+        "hasBetLinks": bool(linked),
     }
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(data, indent=1), encoding="utf-8")

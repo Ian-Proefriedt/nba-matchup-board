@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Matchup Board</title>
-<meta name="description" content="Tonight's NBA lineups, projected minutes, prop lines and injuries with each player's last 10 games.">
+<meta name="description" content="Tonight's NBA lineups, projected minutes, prop lines, suggested bets and injuries with each player's last 10 games.">
 <meta name="theme-color" content="#d24a12">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -37,6 +37,8 @@
   --out: #b42318;
   --out-bg: #fbdcd8;
   --link: #0f4fa8;
+  --fd: #1381e6;
+  --dk: #2f8f2a;
   --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
   --body: "Barlow", "Segoe UI", system-ui, -apple-system, sans-serif;
   color-scheme: light;
@@ -45,7 +47,7 @@
   :root {
     --bg: #0c121b; --surface: #141c28; --surface-2: #1b2534; --ink: #e6ecf4; --muted: #95a4b8; --faint: #6f7d90;
     --line: #273345; --accent: #f37a43; --accent-ink: #1a0b03; --accent-soft: #5a2c17; --up: #4cc287; --up-bg: #12352a;
-    --q: #f1c15a; --q-bg: #3d2f0d; --out: #ff8a7d; --out-bg: #45160f; --link: #7cb6ff;
+    --q: #f1c15a; --q-bg: #3d2f0d; --out: #ff8a7d; --out-bg: #45160f; --link: #7cb6ff; --fd: #5aaefc; --dk: #6fd463;
     color-scheme: dark;
   }
 }
@@ -159,6 +161,52 @@ th:nth-child(-n+2), td:nth-child(-n+2) { text-align: left; }
 tr.avg td { font-weight: 700; border-bottom: 0; }
 td.hit { color: var(--up); font-weight: 700; }
 
+/* Suggested bets */
+.pp.pick { border-color: var(--up); }
+.pp.pick.lean { border-style: dashed; }
+.pp .sd { font-size: .62rem; font-weight: 700; color: var(--up); }
+.grade { font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+.grade.strong { color: var(--accent-ink); background: var(--up); }
+.grade.lean { color: var(--up); background: var(--up-bg); }
+.grade.none { color: var(--muted); background: var(--surface); border: 1px solid var(--line); }
+.picks { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px 14px; display: grid; gap: 10px; }
+.picks > h2 { font-family: var(--display); font-weight: 700; font-size: 1.25rem; margin: 0; }
+.picks > p { margin: 0; color: var(--muted); font-size: .82rem; }
+.pick-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 10px; }
+.pickcard { border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: grid; gap: 6px; align-content: start; }
+.pickcard .who { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: .82rem; color: var(--muted); }
+.pickcard .who b { color: var(--ink); font-size: .95rem; }
+.pickcard .bet { font-family: var(--display); font-weight: 700; font-size: 1.3rem; line-height: 1.1; }
+.pickcard .bet small { font-family: var(--body); font-size: .8rem; font-weight: 600; color: var(--muted); }
+.probs { font-size: .78rem; color: var(--muted); }
+.probs b { color: var(--ink); }
+.probs b.up { color: var(--up); }
+.why { margin: 0; padding-left: 18px; font-size: .8rem; color: var(--muted); display: grid; gap: 2px; }
+.why li.warn { color: var(--q); }
+.showall { justify-self: start; border: 1px solid var(--line); background: var(--surface-2); border-radius: 8px; padding: 5px 12px; cursor: pointer; font-weight: 600; font-size: .82rem; }
+.booklinks { display: flex; flex-wrap: wrap; gap: 6px; }
+.bk {
+  flex: 1 1 150px; display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-height: 44px;
+  padding: 4px 10px; border: 1px solid var(--line); border-left: 4px solid var(--bkc); border-radius: 8px;
+  background: var(--surface); color: var(--ink); font-size: .82rem; line-height: 1.3; text-decoration: none; white-space: nowrap;
+}
+.bk:hover { text-decoration: none; border-color: var(--bkc); }
+.bk.fanduel { --bkc: var(--fd); }
+.bk.draftkings { --bkc: var(--dk); }
+.bk .bn { font-weight: 700; color: var(--bkc); }
+.bk .bl { font-variant-numeric: tabular-nums; }
+.bk .bl b { font-weight: 700; }
+.bk .go { margin-left: auto; color: var(--muted); font-size: .8rem; }
+.bk .best { flex-basis: 100%; font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--up); }
+.bk.off { opacity: .55; }
+.betblock { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.betblock:first-of-type { border-top: 0; padding-top: 0; }
+.betblock .bh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: .85rem; }
+.betblock .bh b { font-size: .9rem; }
+.detail .bets { display: grid; gap: 10px; }
+.detail .projline { font-size: .82rem; color: var(--muted); }
+.detail .projline b { color: var(--ink); }
+
 /* Bench + injuries: two team columns, stacked on phones */
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; }
 .col h3 { font-family: var(--display); font-weight: 700; font-size: 1rem; margin: 0 0 4px; }
@@ -200,17 +248,20 @@ footer { color: var(--muted); font-size: .8rem; display: grid; gap: 4px; }
       </div>
     </div>
   </div>
+  <div id="picks"></div>
   <main id="games"><div class="state">Loading…</div></main>
   <footer>
     <span><b>Orange pill</b>: FanDuel Research projected minutes (▲▼ when 3+ off his recent average). Gray numbers are averages over his last 10 or 5 games from StatMuse.</span>
-    <span><b>Prop chips</b>: the line (FanDuel unless marked) and how often he went over it in his last 10 or 5 games. Green = 70%+, red = 30% or less.</span>
+    <span><b>Prop chips</b>: the line (FanDuel unless marked) and how often he went over it in his last 10 or 5 games. Green = 70%+, red = 30% or less. A green border with O or U marks a suggested over or under (dashed = lean).</span>
+    <span><b>Suggested bets</b>: the model blends his last 10 games (last 5 count double), his per-minute rate times tonight's projected minutes, and FanDuel Research's projection, then compares that with each book's price after removing the vig. Strong = 10%+ expected value per dollar; Lean = 4%+. Odds also need to be in the model's range to count, and picks stop once a game tips off. These are statistical leans, not sure things.</span>
+    <span><b>Bet buttons</b> open that prop at FanDuel or DraftKings. When the board has bet slip links, the bet goes straight onto your slip; otherwise you land on the book's NBA player-prop page for that stat. Always check the line and price in the app before you place it. Must be 21+ and in a state where sports betting is legal. Gambling problem? Call 1-800-GAMBLER.</span>
     <span>Lineups, injuries, odds, refs and prop lines from Rotowire. Refreshes every 30 minutes from noon to midnight ET.</span>
     <span id="missing"></span>
   </footer>
 </div>
 
 <script>
-const state = { range: "10", data: null, open: null };
+const state = { range: "10", data: null, open: null, allPicks: false };
 const BOOKS = { fanduel: "FD", draftkings: "DK", mgm: "MGM", caesars: "CZR", betrivers: "BR", hardrock: "HR", thescore: "SCR", betr: "BETR" };
 const PROPS = [{ key: "pts", label: "PTS", name: "Points" }, { key: "reb", label: "REB", name: "Rebounds" },
                { key: "ast", label: "AST", name: "Assists" }, { key: "threes", label: "3PM", name: "Threes" }];
@@ -222,6 +273,85 @@ const fmt = v => v == null ? "–" : (Number.isInteger(v) ? String(v) : v.toFixe
 const price = n => n > 0 ? `+${n}` : `−${Math.abs(n)}`;
 const avgs = p => p.last10 && (state.range === "5" ? p.last10.avgLast5 : p.last10.avg);
 const isOut = p => p.status === "Out" || p.status === "OFS";
+const pct = x => `${Math.round(x * 100)}%`;
+const BOOK_NAME = { fanduel: "FanDuel", draftkings: "DraftKings" };
+const LINK_BOOKS = ["fanduel", "draftkings"];
+const STAT = { pts: "points", reb: "rebounds", ast: "assists", threes: "threes" };
+
+// Exact bet slip link when the build has one, else the book's NBA prop page for that stat
+function betUrl(book, kind, side, b) {
+  if (b && b.links && b.links[side]) return b.links[side];
+  if (book === "fanduel") return `https://sportsbook.fanduel.com/navigation/nba?tab=player-${STAT[kind]}`;
+  return `https://sportsbook.draftkings.com/leagues/basketball/nba?category=player-${STAT[kind]}&subcategory=${STAT[kind]}`;
+}
+
+function betButton(p, kind, book, side, best) {
+  const b = p.props[kind].books && p.props[kind].books[book];
+  if (!b) return "";
+  const exact = !!(b.links && b.links[side]);
+  const label = `${side} ${fmt(b.line)} ${STAT[kind]}`;
+  const title = exact ? `Add ${p.name} ${label} to your ${BOOK_NAME[book]} bet slip`
+                      : `Open ${BOOK_NAME[book]}'s NBA player ${STAT[kind]} props and find ${p.name}`;
+  return `<a class="bk ${book}${best === false ? " off" : ""}" href="${esc(betUrl(book, kind, side, b))}" target="_blank" rel="noopener" title="${esc(title)}" aria-label="${esc(`${BOOK_NAME[book]}: ${p.name} ${label} at ${price(b[side])}. ${exact ? "Adds to bet slip" : "Opens prop page"}`)}">
+    <span class="bn">${BOOK_NAME[book]}</span><span class="bl num">${side === "over" ? "O" : "U"} ${fmt(b.line)} <b>${price(b[side])}</b></span><span class="go" aria-hidden="true">${exact ? "Slip ↗" : "↗"}</span>
+    ${best ? `<span class="best">Best price</span>` : ""}
+  </a>`;
+}
+
+// Both books for one side, flagging the pick's book as the best price
+function betButtons(p, kind, side, pickBook) {
+  return `<div class="booklinks">${LINK_BOOKS.map(bk => betButton(p, kind, bk, side, pickBook ? bk === pickBook : undefined)).join("")}</div>`;
+}
+
+function gradeTag(m) {
+  return m && m.grade ? `<span class="grade ${m.grade}">${m.grade}</span>` : `<span class="grade none">No edge</span>`;
+}
+
+function allPicks() {
+  const out = [];
+  state.data.games.forEach((g, gi) => ["away", "home"].forEach(side => {
+    const opp = g[side === "away" ? "home" : "away"];
+    for (const p of g[side].starters.concat(g[side].mayNotPlay, g[side].bench || [])) {
+      for (const [kind, prop] of Object.entries(p.props || {})) {
+        if (prop.model && prop.model.grade) out.push({ p, kind, m: prop.model, g, team: g[side], opp, at: side === "away" ? "@" : "vs" });
+      }
+    }
+  }));
+  return out.sort((a, b) => (a.m.grade === b.m.grade ? 0 : a.m.grade === "strong" ? -1 : 1) || b.m.ev - a.m.ev);
+}
+
+function pickCard(x) {
+  const { p, kind, m } = x;
+  const pr = PROPS.find(k => k.key === kind);
+  const notes = m.reasons.map(r => `<li>${esc(r)}</li>`).concat(m.cautions.map(c => `<li class="warn">${esc(c)}</li>`));
+  return `<div class="pickcard">
+    <div class="who"><b>${esc(p.name)}</b>${chip(p.status)}<span>${esc(x.team.abbr)} ${x.at} ${esc(x.opp.abbr)} · ${esc(x.g.time.replace(" ET", ""))}</span>${gradeTag(m)}</div>
+    <div class="bet num">${m.side === "over" ? "Over" : "Under"} ${fmt(m.line)} ${pr.name} <small>${price(m.price)} at ${BOOK_NAME[m.book]}</small></div>
+    <div class="probs num">Model <b class="up">${pct(m.prob)}</b> · book <b>${pct(m.fair)}</b> · value <b class="up">+${pct(m.ev)}</b> per $1 · expects <b>${fmt(m.mean)}</b></div>
+    <ul class="why">${notes.join("")}</ul>
+    ${betButtons(p, kind, m.side, m.book)}
+  </div>`;
+}
+
+function renderPicks() {
+  const el = document.getElementById("picks");
+  const picks = allPicks();
+  const upcoming = state.data.games.filter(g => !g.started).length;
+  if (!picks.length) {
+    el.innerHTML = `<section class="picks"><h2>Suggested bets</h2><p>${upcoming
+      ? "No prop on tonight's board shows enough edge right now. Check back after lineups and lines update."
+      : "Every game has tipped off. Suggested bets return with the next slate."}</p></section>`;
+    return;
+  }
+  const strong = picks.filter(x => x.m.grade === "strong").length;
+  const shown = state.allPicks ? picks : picks.slice(0, 6);
+  el.innerHTML = `<section class="picks">
+    <h2>Suggested bets</h2>
+    <p>${strong} strong, ${picks.length - strong} lean, ranked by expected value. Tap a book to bet it.${state.data.hasBetLinks ? "" : " Buttons open that book's player-prop page."}</p>
+    <div class="pick-list">${shown.map(pickCard).join("")}</div>
+    ${picks.length > 6 ? `<button class="showall" type="button" id="showall">${state.allPicks ? "Show top 6" : `Show all ${picks.length}`}</button>` : ""}
+  </section>`;
+}
 
 function chip(status) {
   if (!status) return "";
@@ -246,7 +376,10 @@ function propChips(p) {
   const chips = PROPS.filter(pr => p.props[pr.key]).map(pr => {
     const l = p.props[pr.key];
     const bk = l.book === "fanduel" ? "" : ` <span class="k">${BOOKS[l.book] || l.book}</span>`;
-    return `<span class="pp num" title="${pr.name} ${l.line}, over ${price(l.over)}"><span class="k">${pr.label}</span><span class="ln">${fmt(l.line)}</span>${bk}${hitPill(hits(p, pr.key, l.line))}</span>`;
+    const m = l.model && l.model.grade ? l.model : null;
+    const tip = m ? `, suggested: ${m.grade} ${m.side} ${m.line} at ${BOOK_NAME[m.book]} ${price(m.price)}` : "";
+    const sd = m ? `<span class="sd">${m.side === "over" ? "O" : "U"}</span>` : "";
+    return `<span class="pp num${m ? ` pick ${m.grade}` : ""}" title="${pr.name} ${l.line}, over ${price(l.over)}${tip}">${sd}<span class="k">${pr.label}</span><span class="ln">${fmt(l.line)}</span>${bk}${hitPill(hits(p, pr.key, l.line))}</span>`;
   });
   return chips.length ? `<div class="props">${chips.join("")}</div>` : "";
 }
@@ -283,20 +416,35 @@ function playerCell(p, side, key) {
     <div class="minline">${minutes(p)}${recent}</div>
     ${body}
     ${propChips(p)}
-    <button class="more" type="button" data-key="${key}">${state.open === key ? "Hide game log" : "Game log"}</button>
+    <button class="more" type="button" data-key="${key}">${state.open === key ? "Hide bets &amp; game log" : "Bets &amp; game log"}</button>
+  </div>`;
+}
+
+function betBlock(p, pr) {
+  const l = p.props[pr.key], m = l.model;
+  const h10 = hits(p, pr.key, l.line, 10), h5 = hits(p, pr.key, l.line, 5);
+  const rate = h10 && h10.n ? ` · ${Math.floor(l.line) + 1}+ in <b>${h10.hit} of ${h10.n}</b>, ${h5.hit} of ${h5.n}` : "";
+  const head = `<div class="bh"><b>${pr.name} ${fmt(l.line)}</b>${gradeTag(m)}<span class="num">over ${price(l.over)} / under ${price(l.under)} (${BOOKS[l.book] || l.book})${rate}</span></div>`;
+  const hasBooks = l.books && Object.keys(l.books).length;
+  if (!m) {
+    return `<div class="betblock">${head}${hasBooks ? betButtons(p, pr.key, "over") + betButtons(p, pr.key, "under") : ""}</div>`;
+  }
+  const lean = m.pOver >= 0.5 ? `over ${pct(m.pOver)}` : `under ${pct(1 - m.pOver)}`;
+  const verdict = m.grade
+    ? `<div class="probs num">Bet the <b class="up">${m.side} ${fmt(m.line)}</b> at ${BOOK_NAME[m.book]} ${price(m.price)}: model <b class="up">${pct(m.prob)}</b> vs book <b>${pct(m.fair)}</b>, value <b class="up">+${pct(m.ev)}</b> per $1. Expects <b>${fmt(m.mean)}</b>.</div>`
+    : `<div class="probs num">No edge. Model expects <b>${fmt(m.mean)}</b> and leans ${lean}, which the price already reflects.</div>`;
+  const notes = (m.grade ? m.reasons : []).map(r => `<li>${esc(r)}</li>`).concat(m.cautions.map(c => `<li class="warn">${esc(c)}</li>`));
+  const sides = m.grade ? [m.side, m.side === "over" ? "under" : "over"] : ["over", "under"];
+  return `<div class="betblock">${head}${verdict}${notes.length ? `<ul class="why">${notes.join("")}</ul>` : ""}
+    ${sides.map(sd => betButtons(p, pr.key, sd, m.grade && sd === m.side ? m.book : null)).join("")}
   </div>`;
 }
 
 function detail(p, opp) {
-  const lines = PROPS.filter(pr => p.props && p.props[pr.key]).map(pr => {
-    const l = p.props[pr.key];
-    const h10 = hits(p, pr.key, l.line, 10), h5 = hits(p, pr.key, l.line, 5);
-    const rate = h10 && h10.n ? ` — ${Math.floor(l.line) + 1}+ in <b>${h10.hit} of last ${h10.n}</b>, ${h5.hit} of last ${h5.n}` : "";
-    return `<span>${pr.name} <b>${fmt(l.line)}</b> · over ${price(l.over)} / under ${price(l.under)} (${BOOKS[l.book] || l.book})${rate}</span>`;
-  });
+  const blocks = PROPS.filter(pr => p.props && p.props[pr.key]).map(pr => betBlock(p, pr));
   const pr = p.proj;
-  if (pr) lines.unshift(`<span>FanDuel projects <b>${fmt(pr.min)} min</b> · ${fmt(pr.pts)} pts · ${fmt(pr.reb)} reb · ${fmt(pr.ast)} ast · ${fmt(pr.threes)} 3s</span>`);
-  const head = `<h3>${esc(p.name)}</h3>${lines.length ? `<div class="lines">${lines.join("")}</div>` : ""}`;
+  const proj = pr ? `<div class="projline">FanDuel projects <b>${fmt(pr.min)} min</b> · ${fmt(pr.pts)} pts · ${fmt(pr.reb)} reb · ${fmt(pr.ast)} ast · ${fmt(pr.threes)} 3s</div>` : "";
+  const head = `<h3>${esc(p.name)}</h3>${proj}${blocks.length ? `<div class="bets">${blocks.join("")}</div>` : ""}`;
   const links = `<div class="links"><a href="${last10Url(p.name)}" target="_blank" rel="noopener">StatMuse last 10 ↗</a><a href="${vsUrl(p.name, opp.name)}" target="_blank" rel="noopener">Career vs ${esc(opp.abbr)} ↗</a></div>`;
   if (!p.last10) return `<div class="detail">${head}<span class="nodata">No StatMuse game log found.</span>${links}</div>`;
   const over = (x, key) => p.props && p.props[key] && x[key] != null && x[key] > p.props[key].line ? ` class="hit"` : "";
@@ -368,6 +516,7 @@ function renderGame(g, gi) {
 
 function render() {
   const d = state.data;
+  renderPicks();
   document.getElementById("games").innerHTML = d.games.length
     ? `<div style="display:grid;gap:14px">${d.games.map(renderGame).join("")}</div>`
     : `<div class="state">No games on the board right now.</div>`;
@@ -408,6 +557,7 @@ document.addEventListener("click", e => {
     render();
     return;
   }
+  if (e.target.id === "showall") { state.allPicks = !state.allPicks; renderPicks(); return; }
   if (e.target.id === "r10") setRange("10");
   if (e.target.id === "r5") setRange("5");
 });

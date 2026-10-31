@@ -32,8 +32,12 @@ jobs:
         with:
           path: cache
           key: statmuse-${{ github.run_id }}
-          restore-keys: statmuse-
+          restore-keys: statmuse-  # also holds the Odds API pull, so it isn't re-bought every run
       - run: python -u build.py
+        env:
+          # Optional: The Odds API key for exact FanDuel/DraftKings bet slip links (Settings → Secrets → Actions)
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          ODDS_API_REFRESH_MIN: ${{ vars.ODDS_API_REFRESH_MIN }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

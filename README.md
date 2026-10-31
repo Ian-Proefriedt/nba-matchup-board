@@ -1,6 +1,6 @@
 # NBA Matchup Board
 
-Tonight's NBA starting lineups, injuries, odds and refs (from Rotowire's public lineups page) next to each player's last 10 games (from StatMuse), on one phone-friendly page.
+Tonight's NBA starting lineups, injuries, odds and refs (from Rotowire's public lineups page) next to each player's last 10 games (from StatMuse), on one phone-friendly page, with suggested player prop bets and buttons that open each prop at FanDuel or DraftKings.
 
 **Live board:** https://ian-proefriedt.github.io/nba-matchup-board/
 
@@ -12,11 +12,30 @@ A GitHub Actions workflow runs `build.py` every day at 21:00 UTC (5 PM EDT / 4 P
 
 To refresh by hand (for example after late lineup news): **Actions → Build board → Run workflow**.
 
+## Suggested bets
+
+For every points, rebounds, assists and threes line at FanDuel and DraftKings, `build.py` (`suggest()`) estimates the chance of the over:
+
+1. **Expected stat**: a blend of FanDuel Research's projection, his per-minute rate over the last 10 games times tonight's projected minutes, and a recent average where the last 5 games count double.
+2. **Probability**: a normal curve around that expectation (Poisson for threes), averaged with his recent hit rate on that exact line (shrunk toward 50%).
+3. **Against the market**: that probability is pulled 60% of the way back to the book's no-vig price, since books are usually right. A bet is suggested only when there's still value left: **Strong** = 10%+ expected profit per dollar, **Lean** = 4%+. Both books are checked, and the board recommends whichever line and price is better.
+
+There are no picks once a game tips off, because Rotowire then shows live lines. There are also none when the model and the book disagree by more than 22 points (usually a stale line or a data mismatch). Players listed questionable are capped at Lean, with a warning. Each pick lists the reasons behind it: hit rate, averages, projection, minutes trend, fair price, and the other book's price.
+
+These are statistical leans, not guarantees.
+
+## Bet buttons (FanDuel / DraftKings)
+
+- **Without setup**: each button opens that book's NBA player-prop page for the stat (points, rebounds, assists or threes). From there you find the player.
+- **Exact bet slip links (optional)**: add a [The Odds API](https://the-odds-api.com) key as the repository secret `ODDS_API_KEY` (**Settings → Secrets and variables → Actions**). The build then pulls FanDuel and DraftKings player props with `includeLinks=true`, and each button drops that exact over/under onto the bet slip. The Odds API's lines also replace Rotowire's for those two books.
+  - Cost: 4 credits per game (one per market). To save credits, the pull is cached and reused for `ODDS_API_REFRESH_MIN` minutes (default 180; set it as a repository variable). A 10-game night at the default is about 160–200 credits, which needs a paid plan. The free 500/month only covers a couple of nights.
+  - If the key is missing or the API fails, the board falls back to the prop-page buttons.
+
 ## Run locally
 
 ```bash
 pip install -r requirements.txt
-python build.py
+python build.py          # or: ODDS_API_KEY=... python build.py
 python -m http.server -d site 8000
 ```
 
