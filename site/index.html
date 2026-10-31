@@ -437,7 +437,7 @@ function legAt(l, book) {
   const m = x.p.props[l.kind].model;
   const pOver = m && m.pOverByBook ? m.pOverByBook[book] : null;
   return {
-    line: b.line, price: b[l.side], exact: !!(b.links && b.links[l.side]),
+    line: b.line, price: b[l.side], exact: !!(b.links && b.links[l.side]), sid: b.sids && b.sids[l.side],
     url: betUrl(book, l.kind, l.side, b), prob: pOver == null ? null : l.side === "over" ? pOver : 1 - pOver,
   };
 }
@@ -514,20 +514,27 @@ function reviewView() {
     </div>
     ${n > 1 && q.prob != null ? `<p class="note">Model says this hits <b>${pct(q.prob)}</b> of the time; the book's price implies <b>${pct(implied)}</b> (with its cut). ${ev >= 0 ? `That's <b>+${pct(ev)}</b> expected value per $1.` : `That's <b>${pct(ev)}</b> per $1: the book has the edge.`}</p>` : ""}
     ${warns.length ? `<ul class="warns">${warns.map(w => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
-    <button type="button" class="cta ${book}" id="confirm"${ready ? "" : " disabled"}>${n < 2 ? "Add at least 2 legs" : q.missing ? `Not all legs are at ${BOOK_NAME[book]}` : `Confirm & go to ${BOOK_NAME[book]}`}</button>
+    <button type="button" class="cta ${book}" id="confirm"${ready ? "" : " disabled"}>${n < 2 ? "Add at least 2 legs" : q.missing ? `Not all legs are at ${BOOK_NAME[book]}` : AUTO_SLIP[book] && slipUrl(book, q.priced) ? `Confirm & build ${BOOK_NAME[book]} slip` : `Confirm & go to ${BOOK_NAME[book]}`}</button>
     <div class="row2"><button type="button" class="ghost" id="clearpar">Clear parlay</button><button type="button" class="ghost" data-close>Keep building</button></div>
   </div>`;
 }
 
-function combinedUrl(book, priced) {
-  // Neither book documents multi-leg links; these follow their single-leg formats and are offered as a shortcut only
+// The whole parlay on the bet slip in one link, or null when a leg lacks the book's own ids.
+// Neither book documents these. DraftKings' ?outcomes=<id>+<id> is reported to load a full parlay, so confirm
+// opens it directly (AUTO_SLIP); FanDuel's indexed addToBetslip is untested and only offered as a shortcut.
+const AUTO_SLIP = { draftkings: true, fanduel: false };
+function slipUrl(book, priced) {
   try {
-    const urls = priced.map(x => new URL(x.url));
-    if (book === "fanduel") {
-      return "https://sportsbook.fanduel.com/addToBetslip?" + urls.map((u, i) =>
-        `marketId[${i}]=${encodeURIComponent(u.searchParams.get("marketId"))}&selectionId[${i}]=${encodeURIComponent(u.searchParams.get("selectionId"))}`).join("&");
+    if (book === "draftkings") {
+      const ids = priced.map(x => x.sid || (x.exact ? new URL(x.url).searchParams.get("outcomes") : null));
+      if (ids.some(id => !id)) return null;
+      return `https://sportsbook.draftkings.com/?outcomes=${ids.map(encodeURIComponent).join("+")}`;
     }
-    return `${urls[0].origin}${urls[0].pathname}?outcomes=${urls.map(u => u.searchParams.get("outcomes")).join("+")}`;
+    if (!priced.every(x => x.exact)) return null;
+    return "https://sportsbook.fanduel.com/addToBetslip?" + priced.map((x, i) => {
+      const u = new URL(x.url);
+      return `marketId[${i}]=${encodeURIComponent(u.searchParams.get("marketId"))}&selectionId[${i}]=${encodeURIComponent(u.searchParams.get("selectionId"))}`;
+    }).join("&");
   } catch (e) { return null; }
 }
 
@@ -543,16 +550,19 @@ function sendView() {
     </div>`;
   }).join("");
   const all = Object.keys(parlay.done).length >= n;
-  const combo = exact ? combinedUrl(book, q.priced) : null;
+  const combo = slipUrl(book, q.priced), auto = combo && AUTO_SLIP[book];
   const home = book === "fanduel" ? "https://sportsbook.fanduel.com/navigation/nba" : "https://sportsbook.draftkings.com/leagues/basketball/nba";
   return `<div class="sh"><button type="button" class="x" style="margin:0" id="back" aria-label="Back to review">‹</button><h2 id="sheet-title">Send to ${BOOK_NAME[book]}</h2><button type="button" class="x" data-close aria-label="Close">✕</button></div>
   <div class="sb">
     <p class="note">Confirmed: <b>${n}-leg parlay</b>, est. <b class="num">${price(q.american)}</b>, <b>${money(parlay.stake)}</b> to win <b>${money(parlay.stake * (q.dec - 1))}</b>.
-    ${exact ? `Tap <b>Add</b> on each leg to put it on your ${BOOK_NAME[book]} bet slip.`
+    ${auto ? `${parlay.opened ? `${BOOK_NAME[book]} should have opened with all ${n} legs on your bet slip.` : `<b>Build slip</b> puts all ${n} legs on your ${BOOK_NAME[book]} bet slip.`} Nothing is placed until you tap Place Bet there. If a leg is missing (the book may have moved that line), add it below.`
+      : exact ? `Tap <b>Add</b> on each leg to put it on your ${BOOK_NAME[book]} bet slip.`
             : `${BOOK_NAME[book]} only takes bets placed in its own app, so add each leg there: <b>Open</b> goes to that stat's player props, then tap the player's line.`}</p>
     <div class="legs">${legs}</div>
     ${all ? `<p class="note" style="color:var(--up)"><b>All ${n} legs added.</b> In ${BOOK_NAME[book]}, open the bet slip, choose <b>Parlay</b>, enter ${money(parlay.stake)}, and check that the lines and odds match before you place it.</p>` : ""}
-    ${combo ? `<a class="cta ${book}" href="${esc(combo)}" target="_blank" rel="noopener">Try adding all ${n} at once ↗</a>` : `<a class="cta ${book}" href="${home}" target="_blank" rel="noopener">Open ${BOOK_NAME[book]} ↗</a>`}
+    ${auto ? `<a class="cta ${book}" href="${esc(combo)}" target="_blank" rel="noopener">${parlay.opened ? "Build slip again" : "Build slip"} in ${BOOK_NAME[book]} ↗</a>`
+      : combo ? `<a class="cta ${book}" href="${esc(combo)}" target="_blank" rel="noopener">Try adding all ${n} at once ↗</a>`
+      : `<a class="cta ${book}" href="${home}" target="_blank" rel="noopener">Open ${BOOK_NAME[book]} ↗</a>`}
     <div class="row2"><button type="button" class="ghost" id="copypar">Copy parlay</button><button type="button" class="ghost" id="back2">Edit parlay</button></div>
     <p class="note">Must be 21+ and in a state where ${BOOK_NAME[book]} is legal. Gambling problem? Call 1-800-GAMBLER.</p>
   </div>`;
@@ -856,8 +866,14 @@ document.addEventListener("click", e => {
     if (bookBtn) { parlay.book = bookBtn.dataset.book; parlay.done = {}; saveParlay(); parlayChanged(); return; }
     const rm = t.closest("[data-rm]");
     if (rm) { parlay.legs.splice(Number(rm.dataset.rm), 1); saveParlay(); parlayChanged(); render(); return; }
-    if (t.closest("#confirm")) { parlay.step = "send"; parlay.done = {}; renderSheet(); return; }
-    if (t.closest("#back") || t.closest("#back2")) { parlay.step = "review"; renderSheet(); return; }
+    if (t.closest("#confirm")) {
+      parlay.step = "send"; parlay.done = {}; parlay.opened = false;
+      const combo = AUTO_SLIP[parlay.book] && slipUrl(parlay.book, parlayAt(parlay.book).priced);
+      if (combo) { window.open(combo, "_blank", "noopener"); parlay.opened = true; }
+      renderSheet();
+      return;
+    }
+    if (t.closest("#back") || t.closest("#back2")) { parlay.step = "review"; parlay.opened = false; renderSheet(); return; }
     if (t.closest("#clearpar")) { parlay.legs = []; saveParlay(); sheet.close(); render(); return; }
     if (t.closest("#copypar")) { copyParlay(); return; }
     const done = t.closest("[data-done]");

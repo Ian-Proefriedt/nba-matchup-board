@@ -320,8 +320,13 @@ def main_line(pairs):
 
 
 def fetch_odds_api(games):
-    """{"TEAM|player key": {kind: {book: {line, over, under, links}}}} for FanDuel and DraftKings."""
+    """{"TEAM|player key": {kind: {book: {line, over, under, links, sids}}}} for FanDuel and DraftKings.
+
+    sids are the books' own outcome ids: DraftKings fills a whole parlay onto the bet slip from
+    sportsbook.draftkings.com/?outcomes=<id>+<id> (undocumented, but works), so the board needs them.
+    """
     events = odds_api_get("/events")  # free: doesn't count against the quota
+    now = datetime.now(timezone.utc)
     by_nick = {}
     for g in games:
         for side in ("away", "home"):
@@ -335,8 +340,11 @@ def fetch_odds_api(games):
                 teams[full] = code
         if len(teams) != 2:
             continue  # not on tonight's board
+        if datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00")) <= now:
+            continue  # started: live lines, and not worth the credits
         data = odds_api_get(f"/events/{ev['id']}/odds", bookmakers=",".join(LINK_BOOKS),
-                            markets=",".join(ODDS_API_MARKETS), oddsFormat="american", includeLinks="true")
+                            markets=",".join(ODDS_API_MARKETS), oddsFormat="american",
+                            includeLinks="true", includeSids="true")
         for bm in data.get("bookmakers", []):
             for mk in bm.get("markets", []):
                 kind = ODDS_API_MARKETS.get(mk["key"])
@@ -348,14 +356,16 @@ def fetch_odds_api(games):
                     if side not in ("over", "under") or o.get("point") is None or not o.get("description"):
                         continue
                     link = o.get("link") or mk.get("link") or bm.get("link")
-                    by_player.setdefault(o["description"], {}).setdefault(o["point"], {})[side] = {"price": o["price"], "link": link}
+                    by_player.setdefault(o["description"], {}).setdefault(o["point"], {})[side] = {
+                        "price": o["price"], "link": link, "sid": o.get("sid")}
                 for player, pairs in by_player.items():
                     line = main_line(pairs)
                     if line is None:
                         continue
                     sides = pairs[line]
                     entry = {"line": float(line), "over": sides["over"]["price"], "under": sides["under"]["price"],
-                             "links": {"over": sides["over"]["link"], "under": sides["under"]["link"]}}
+                             "links": {"over": sides["over"]["link"], "under": sides["under"]["link"]},
+                             "sids": {"over": sides["over"]["sid"], "under": sides["under"]["sid"]}}
                     # outcomes don't name a team; the player is on one of the two in this game
                     for code in teams.values():
                         out.setdefault(f"{code}|{name_key(player)}", {}).setdefault(kind, {})[bm["key"]] = entry

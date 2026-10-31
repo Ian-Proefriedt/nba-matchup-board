@@ -38,7 +38,10 @@ Tap **+ Leg** on any over or under, in a suggested bet or a player's "Bets & gam
 - Pick **FanDuel** or **DraftKings**. Each leg is priced at that book's line, and a leg the book doesn't offer is flagged.
 - Set a stake to see the payout. The model's hit chance multiplies its leg chances, which assumes the legs are independent. It's compared with the chance the book's odds imply.
 - It warns about same-game legs (books reprice those), games already started, questionable players, and legs ruled out.
-- **Confirm & go to FanDuel/DraftKings** lists each leg with a button and a checkbox. With `ODDS_API_KEY` set, each button adds that exact selection to the bet slip. There's also a "Try adding all at once" link, but neither book documents a multi-leg link format, so it's a shortcut only. Without the key, each button opens that stat's player-prop page. **Copy parlay** puts the list on the clipboard.
+- **DraftKings, with `ODDS_API_KEY` set:** **Confirm & build DraftKings slip** opens DraftKings with every leg already on the bet slip. It only fills the slip; nothing is placed until you tap Place Bet in DraftKings. The link is `sportsbook.draftkings.com/?outcomes=<id>+<id>`, built from each leg's DraftKings outcome id (The Odds API's `includeSids`). DraftKings doesn't document this format, but other builders report it loads a whole parlay. If DraftKings has moved a line since the last pull, that leg won't load, so the sheet keeps a per-leg list to add it by hand.
+- **FanDuel, with the key:** each leg's button adds that selection to the bet slip, and "Try adding all at once" uses FanDuel's indexed `addToBetslip` form. That form is untested, so it's offered as a shortcut, not opened automatically.
+- **Without the key:** each button opens that stat's player-prop page, and you tap the player's line there.
+- **Copy parlay** puts the list on the clipboard.
 
 The parlay is saved in the browser until the slate changes.
 
