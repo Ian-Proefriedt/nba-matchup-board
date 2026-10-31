@@ -463,7 +463,7 @@ def suggest(p, kind, started=False):
         mu = 0.6 * min_adj + 0.4 * wavg
     sigma = max(pstdev(vals), math.sqrt(max(mu, 0.5)), 0.8)
 
-    best = None
+    best, by_book = None, {}
     for book, b in books.items():
         line = b["line"]
         p_dist = p_over_poisson(mu, line) if kind == "threes" else p_over_normal(mu, sigma, line)
@@ -472,6 +472,7 @@ def suggest(p, kind, started=False):
         fair_over = implied(b["over"]) / (implied(b["over"]) + implied(b["under"]))
         raw = 0.6 * p_dist + 0.4 * p_hist
         p_over = (1 - MARKET_WEIGHT) * raw + MARKET_WEIGHT * fair_over
+        by_book[book] = round(p_over, 3)  # parlays price each leg at the book they're sent to
         for side, prob, fair, price in (("over", p_over, fair_over, b["over"]), ("under", 1 - p_over, 1 - fair_over, b["under"])):
             ev = prob * payout(price) - (1 - prob)
             if best is None or ev > best["ev"]:
@@ -534,7 +535,7 @@ def suggest(p, kind, started=False):
     return {
         "side": side, "book": best["book"], "line": line, "price": best["price"],
         "prob": round(best["prob"], 3), "fair": round(best["fair"], 3), "ev": round(ev, 3),
-        "pOver": round(best["pOver"], 3), "mean": round(mu, 1), "grade": grade,
+        "pOver": round(best["pOver"], 3), "pOverByBook": by_book, "mean": round(mu, 1), "grade": grade,
         "reasons": reasons, "cautions": cautions,
     }
 
