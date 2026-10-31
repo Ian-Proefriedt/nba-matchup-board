@@ -520,9 +520,10 @@ function reviewView() {
 }
 
 // The whole parlay on the bet slip in one link, or null when a leg lacks the book's own ids.
-// Neither book documents these. DraftKings' ?outcomes=<id>+<id> is reported to load a full parlay, so confirm
-// opens it directly (AUTO_SLIP); FanDuel's indexed addToBetslip is untested and only offered as a shortcut.
-const AUTO_SLIP = { draftkings: true, fanduel: false };
+// Neither book documents these: DraftKings' ?outcomes=<id>+<id> is reported to load a full parlay, and
+// FanDuel's addToBetslip with marketId[n]/selectionId[n] pairs is untested. Confirm opens them directly
+// (AUTO_SLIP); the send sheet keeps per-leg links for anything that doesn't make it onto the slip.
+const AUTO_SLIP = { draftkings: true, fanduel: true };
 function slipUrl(book, priced) {
   try {
     if (book === "draftkings") {
