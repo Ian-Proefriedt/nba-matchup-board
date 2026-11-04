@@ -521,6 +521,16 @@ def espn_dk_events():
     return out
 
 
+def espn_game_count(slate_date):
+    """How many NBA games ESPN lists for 'November 3, 2026'; None if the date won't parse or ESPN fails."""
+    try:
+        day = datetime.strptime(slate_date or "", "%B %d, %Y").strftime("%Y%m%d")
+        return len(get_json(f"{ESPN_SCOREBOARD}?dates={day}").get("events", []))
+    except Exception as err:
+        print(f"  ESPN check unavailable: {err}", file=sys.stderr)
+        return None
+
+
 def fetch_propline_dk(games):
     """DraftKings points/rebounds/assists/threes with DK's own outcome ids, from PropLine's bulk /odds.
 
@@ -840,7 +850,13 @@ def main():
     slate_date, games = parse_lineups(fetch(LINEUPS_URL))
     print(f"  {len(games)} games for {slate_date}")
     if not games:
-        sys.exit("No games parsed from Rotowire; page layout may have changed.")
+        # Off days (Election Day, All-Star break) are real: publish an empty board instead of failing.
+        # Only fail when ESPN says there are games and we still parsed none.
+        if espn_game_count(slate_date) != 0:
+            sys.exit("No games parsed from Rotowire; page layout may have changed.")
+        print("  ESPN confirms no NBA games; publishing an empty board")
+        write_data({"slateDate": slate_date, "games": [], "missingStats": [], "hasProjections": False, "hasBetLinks": False})
+        return
 
     teams = {team_code(g[side]["abbr"]) for g in games for side in ("away", "home")}
     print("Fetching FanDuel Research projections...")
@@ -937,17 +953,21 @@ def main():
             attach_suggestions(g[side], g["started"])
         attach_dk_pages(g, dk_events)
 
-    data = {
+    write_data({
         "slateDate": slate_date,
-        "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "games": games,
         "missingStats": failed,
         "hasProjections": bool(projections),
         "hasBetLinks": bool(linked or fd_linked or dk_linked),
-    }
+    })
+    print(f"  ({len(failed)} players without StatMuse data)")
+
+
+def write_data(data):
+    data = {"slateDate": data.pop("slateDate"), "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"), **data}
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(data, indent=1), encoding="utf-8")
-    print(f"Wrote {OUT_PATH} ({len(failed)} players without StatMuse data)")
+    print(f"Wrote {OUT_PATH}")
 
 
 if __name__ == "__main__":
