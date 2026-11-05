@@ -3,7 +3,7 @@
 Pulls tonight's lineups, injuries, odds and refs from Rotowire's public
 lineups page, player points/rebounds/assists/threes lines from Rotowire's props page,
 projected minutes from FanDuel Research, then each relevant player's last
-10 games from StatMuse. Each prop then gets a suggested side (see suggest()).
+10 games from ESPN's public game logs (StatMuse as a fallback). Each prop then gets a suggested side (see suggest()).
 FanDuel lines and bet slip links come free from FanDuel Research. DraftKings bet
 slip ids come from PropLine (free key, PROPLINE_API_KEY) or The Odds API
 (ODDS_API_KEY); without either, DraftKings buttons open the game's DraftKings page,
@@ -767,14 +767,22 @@ def attach_suggestions(side, started):
 # ---------- StatMuse ----------
 
 def parse_statmuse(html, name):
+    def table_header(table):
+        header = [text(th).upper() for th in table.find("thead").find_all("th")] if table.find("thead") else []
+        if not header and table.find("tr"):
+            header = [text(c).upper() for c in table.find("tr").find_all(["th", "td"])]
+        return header
+
+    # StatMuse pages can carry other tables (e.g. standings) before the game log, so pick the game log by its columns
     soup = BeautifulSoup(html, "html.parser")
-    table = soup.find("table")
-    if not table:
+    table, header = None, []
+    for t in soup.find_all("table"):
+        h = table_header(t)
+        if "DATE" in h and "MIN" in h:
+            table, header = t, h
+            break
+    if table is None:
         return None
-    header = [text(th).upper() for th in table.find("thead").find_all("th")] if table.find("thead") else []
-    if not header:
-        first = table.find("tr")
-        header = [text(c).upper() for c in first.find_all(["th", "td"])]
 
     def col(label):
         return header.index(label) if label in header else None
@@ -812,6 +820,107 @@ def parse_statmuse(html, name):
             "threes": num("3PM"), "stl": num("STL"), "blk": num("BLK"), "tov": num("TOV"),
             "plusMinus": num("+/-"),
         })
+    if not games:
+        return None
+
+    def avg(key, rows):
+        vals = [g[key] for g in rows if g[key] is not None]
+        return round(mean(vals), 1) if vals else None
+
+    last5 = games[-5:]
+    return {
+        "games": games,
+        "avg": {k: avg(k, games) for k in ["min", "pts", "reb", "ast", "threes"]},
+        "avgLast5": {k: avg(k, last5) for k in ["min", "pts", "reb", "ast", "threes"]},
+    }
+
+
+# ---------- ESPN game logs (free, no login) ----------
+
+ESPN_TEAMS = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"
+ESPN_ROSTER = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{team}/roster"
+ESPN_GAMELOG = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{id}/gamelog"
+ET = ZoneInfo("America/New_York")
+
+
+def espn_athlete_ids(teams_needed):
+    """{team code: [(ESPN athlete id, name), ...]} for the slate's teams."""
+    league = get_json(ESPN_TEAMS)["sports"][0]["leagues"][0]["teams"]
+    team_ids = {team_code(t["team"]["abbreviation"]): t["team"]["id"] for t in league}
+    out = {}
+    for code in teams_needed:
+        if code not in team_ids:
+            continue
+        athletes = get_json(ESPN_ROSTER.format(team=team_ids[code])).get("athletes", [])
+        if athletes and "items" in athletes[0]:  # some seasons group the roster by position
+            athletes = [a for grp in athletes for a in grp["items"]]
+        out[code] = [(a["id"], a.get("fullName") or a.get("displayName", "")) for a in athletes]
+    return out
+
+
+def find_athlete(name, roster):
+    """ESPN id for a Rotowire name on that team's roster, by the same rules as find_projection."""
+    match = find_projection(name, [{"name": n, "id": i} for i, n in roster])
+    return match["id"] if match else None
+
+
+def espn_season_games(athlete_id, season=None):
+    """One season's regular season, play-in and playoff games for a player, oldest first."""
+    url = ESPN_GAMELOG.format(id=athlete_id) + (f"?season={season}" if season else "")
+    d = get_json(url)
+    labels = [l.upper() for l in d.get("labels", [])]
+    events = d.get("events", {})
+
+    def stat(stats, label, made_only=False):
+        if label not in labels:
+            return None
+        raw = stats[labels.index(label)]
+        if made_only:
+            raw = raw.split("-")[0]
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    games = []
+    for st in d.get("seasonTypes", []):
+        if "preseason" in st.get("displayName", "").lower() or "all-star" in st.get("displayName", "").lower():
+            continue
+        for cat in st.get("categories", []):
+            for row in cat.get("events", []):
+                ev = events.get(row.get("eventId"), {})
+                stats = row.get("stats", [])
+                if not ev or len(stats) < len(labels):
+                    continue
+                when = datetime.fromisoformat(ev["gameDate"].replace("Z", "+00:00")).astimezone(ET)
+                games.append({
+                    "when": when,
+                    "date": f"{when.month}/{when.day}/{when.year}",
+                    "opp": team_code((ev.get("opponent") or {}).get("abbreviation", "")),
+                    "homeAway": "@" if ev.get("atVs") == "@" else "vs",
+                    "min": stat(stats, "MIN"), "pts": stat(stats, "PTS"), "reb": stat(stats, "REB"),
+                    "ast": stat(stats, "AST"), "threes": stat(stats, "3PT", made_only=True),
+                    "stl": stat(stats, "STL"), "blk": stat(stats, "BLK"), "tov": stat(stats, "TO"),
+                    "plusMinus": None,
+                })
+    games.sort(key=lambda g: g["when"])
+    return games, d
+
+
+def espn_last10(athlete_id):
+    """Last 10 games (reaching back into last season early in the year), shaped like parse_statmuse()."""
+    games, d = espn_season_games(athlete_id)
+    if len(games) < 10:
+        season = next((f.get("value") for f in d.get("filters", []) if f.get("name") == "season"), None)
+        if season and str(season).isdigit():
+            try:
+                older, _ = espn_season_games(athlete_id, int(season) - 1)
+                games = older + games
+            except Exception:
+                pass  # rookies have no prior season; this season's games are enough
+    games = games[-10:]
+    for g in games:
+        del g["when"]
     if not games:
         return None
 
@@ -882,24 +991,46 @@ def main():
             attach_props(team_code(g[side]["abbr"]), g[side], props)
 
     players = {}
+    player_team = {}
     for g in games:
         for side in ("away", "home"):
             for p in g[side]["starters"] + g[side]["mayNotPlay"] + g[side]["bench"]:
                 if p["status"] not in SKIP_STATS_FOR:
                     players[p["name"]] = None
+                    player_team[p["name"]] = team_code(g[side]["abbr"])
 
-    # Game logs only change once games finish, so reuse today's cached pages and fetch only new names
+    # Game logs only change once games finish, so reuse today's cached logs and fetch only names still missing
     cache = load_cache()
-    todo = [n for n in players if n not in cache]
-    print(f"StatMuse: {len(players) - len(todo)} cached, fetching {len(todo)}...")
+    todo = [n for n in players if not cache.get(n)]
+    print(f"Game logs: {len(players) - len(todo)} cached, fetching {len(todo)} from ESPN...")
+    try:
+        rosters = espn_athlete_ids({player_team[n] for n in todo}) if todo else {}
+    except Exception as err:  # fall back to StatMuse for everyone
+        print(f"  ESPN rosters unavailable: {err}", file=sys.stderr)
+        rosters = {}
+    statmuse_todo = []
     for i, name in enumerate(todo, 1):
-        try:
-            cache[name] = parse_statmuse(fetch(STATMUSE_URL.format(slug=slugify(name))), name)
-        except Exception as err:  # keep going; one bad page shouldn't sink the board
-            print(f"  {name}: {err}", file=sys.stderr)
-            cache[name] = None
+        athlete = find_athlete(name, rosters.get(player_team[name], []))
+        log = None
+        if athlete:
+            try:
+                log = espn_last10(athlete)
+            except Exception as err:  # keep going; one bad player shouldn't sink the board
+                print(f"  {name}: ESPN {err}", file=sys.stderr)
+        cache[name] = log
+        if not log:
+            statmuse_todo.append(name)
         if i % 20 == 0:
             print(f"  {i}/{len(todo)}")
+        time.sleep(0.2)
+    # StatMuse now shows full game logs only to signed-in users after a few pages, so it's a fallback
+    if statmuse_todo:
+        print(f"  trying StatMuse for {len(statmuse_todo)}: {', '.join(statmuse_todo)}")
+    for name in statmuse_todo:
+        try:
+            cache[name] = parse_statmuse(fetch(STATMUSE_URL.format(slug=slugify(name))), name)
+        except Exception as err:
+            print(f"  {name}: StatMuse {err}", file=sys.stderr)
         time.sleep(STATMUSE_DELAY)
     save_cache(cache)
     for name in players:
@@ -960,7 +1091,7 @@ def main():
         "hasProjections": bool(projections),
         "hasBetLinks": bool(linked or fd_linked or dk_linked),
     })
-    print(f"  ({len(failed)} players without StatMuse data)")
+    print(f"  ({len(failed)} players without a game log)")
 
 
 def write_data(data):

@@ -324,7 +324,7 @@ footer { color: var(--muted); font-size: .8rem; display: grid; gap: 4px; }
   <dialog class="sheet" id="sheet" aria-labelledby="sheet-title"></dialog>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <footer>
-    <span><b>Orange pill</b>: FanDuel Research projected minutes (▲▼ when 3+ off his recent average). Gray numbers are averages over his last 10 or 5 games from StatMuse.</span>
+    <span><b>Orange pill</b>: FanDuel Research projected minutes (▲▼ when 3+ off his recent average). Gray numbers are averages over his last 10 or 5 games (ESPN game logs).</span>
     <span><b>Prop chips</b>: the line (FanDuel unless marked) and how often he went over it in his last 10 or 5 games. Green = 70%+, red = 30% or less. A green border with O or U marks a suggested over or under (dashed = lean).</span>
     <span><b>Suggested bets</b>: the model blends his last 10 games (last 5 count double), his per-minute rate times tonight's projected minutes, and FanDuel Research's projection, then compares that with each book's price after removing the vig. Strong = 10%+ expected value per dollar; Lean = 4%+. Odds also need to be in the model's range to count, and picks stop once a game tips off. These are statistical leans, not sure things.</span>
     <span><b>Parlays</b>: tap <b>+ Leg</b> on any over or under to build a parlay, then review it, pick FanDuel or DraftKings, and confirm. Odds shown are each book's single-leg prices multiplied together. Books reprice same-game parlays, so the final odds on their slip can be different. Hit chance multiplies the model's leg chances and assumes the legs are independent.</span>
@@ -714,7 +714,7 @@ function playerCell(p, side, key) {
   const recent = a ? `<span class="recentmin num">L${state.range} ${fmt(a.min)}</span>` : "";
   const body = a
     ? `${spark(p)}<div class="statline num"><b>${fmt(a.pts)}</b> pts · <b>${fmt(a.reb)}</b> reb · <b>${fmt(a.ast)}</b> ast · <b>${fmt(a.threes)}</b> 3s</div>`
-    : `<span class="nodata">No StatMuse log</span>`;
+    : `<span class="nodata">No game log</span>`;
   return `<div class="player ${side}">
     <div class="nameline"><a class="pname" href="${last10Url(p.name)}" target="_blank" rel="noopener">${esc(p.name)}</a>${chip(p.status)}</div>
     <div class="minline">${minutes(p)}${recent}</div>
@@ -750,7 +750,7 @@ function detail(p, opp, gid) {
   const proj = pr ? `<div class="projline">FanDuel projects <b>${fmt(pr.min)} min</b> · ${fmt(pr.pts)} pts · ${fmt(pr.reb)} reb · ${fmt(pr.ast)} ast · ${fmt(pr.threes)} 3s</div>` : "";
   const head = `<h3>${esc(p.name)}</h3>${proj}${blocks.length ? `<div class="bets">${blocks.join("")}</div>` : ""}`;
   const links = `<div class="links"><a href="${last10Url(p.name)}" target="_blank" rel="noopener">StatMuse last 10 ↗</a><a href="${vsUrl(p.name, opp.name)}" target="_blank" rel="noopener">Career vs ${esc(opp.abbr)} ↗</a></div>`;
-  if (!p.last10) return `<div class="detail">${head}<span class="nodata">No StatMuse game log found.</span>${links}</div>`;
+  if (!p.last10) return `<div class="detail">${head}<span class="nodata">No game log found.</span>${links}</div>`;
   const over = (x, key) => p.props && p.props[key] && x[key] != null && x[key] > p.props[key].line ? ` class="hit"` : "";
   const rows = p.last10.games.slice().reverse().map(x => `<tr><td>${esc(x.date.replace(/\/\d{4}$/, ""))}</td><td>${x.homeAway === "@" ? "@" : "vs"} ${esc(x.opp)}</td><td>${fmt(x.min)}</td><td${over(x, "pts")}>${fmt(x.pts)}</td><td${over(x, "reb")}>${fmt(x.reb)}</td><td${over(x, "ast")}>${fmt(x.ast)}</td><td${over(x, "threes")}>${fmt(x.threes)}</td></tr>`).join("");
   const a = p.last10.avg;
@@ -853,7 +853,7 @@ async function load() {
   document.getElementById("bar").hidden = false;
   buildIndex();
   loadParlay();
-  if (d.missingStats && d.missingStats.length) document.getElementById("missing").textContent = `No StatMuse log found for: ${d.missingStats.join(", ")}.`;
+  if (d.missingStats && d.missingStats.length) document.getElementById("missing").textContent = `No game log found for: ${d.missingStats.join(", ")}.`;
   setRange(state.range);
 }
 
