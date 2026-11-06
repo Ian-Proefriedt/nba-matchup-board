@@ -1,6 +1,6 @@
 # NBA Matchup Board
 
-Tonight's NBA starting lineups, injuries, odds and refs (from Rotowire's public lineups page) next to each player's last 10 games (from StatMuse), on one phone-friendly page, with suggested player prop bets and buttons that open each prop at FanDuel or DraftKings.
+Tonight's NBA starting lineups, injuries, odds and refs (from Rotowire's public lineups page) next to each player's last 10 games (from ESPN's public game logs), on one phone-friendly page, with suggested player prop bets and buttons that open each prop at FanDuel or DraftKings.
 
 **Live board:** https://ian-proefriedt.github.io/nba-matchup-board/
 
@@ -71,5 +71,5 @@ Then open http://localhost:8000.
 ## Notes
 
 - Minutes are actual minutes from each player's last 10 (or 5) games, not projections. Rotowire's projected minutes are subscriber-only and aren't used.
-- StatMuse is only queried for starters and players listed Ques/Doubt, with a short pause between requests.
-- If Rotowire or StatMuse change their page layout, `build.py` will need updating.
+- Game logs come from ESPN's public API, only for players not ruled out. StatMuse is a fallback for anyone ESPN doesn't list; it now shows full game logs only to signed-in users after a few pages.
+- If Rotowire, ESPN or StatMuse change their page layout or API, `build.py` will need updating.
